@@ -1,0 +1,387 @@
+/**
+ * ShopMate AI — Google link
+ *
+ * Runs inside YOUR Google account. It lets the GP Invoices app:
+ *   - email invoice PDFs from your Gmail
+ *   - copy every PDF into the "ShopMate AI" folder in your Google Drive (older set-ups keep their "Golden Product Invoices" folder)
+ *     (one sub-folder per business)
+ *   - send reminder emails to customers at the time you schedule, even when your phone is off
+ *   - back up and restore the app's data in Google Drive
+ *   - share a business with partners and staff, each seeing only what you allow (People & access)
+ *
+ * Setup (once):
+ *   1. Run the "setup" function (choose it at the top, press Run) and allow access.
+ *   2. Deploy > New deployment > Web app. Execute as: Me. Who has access: Anyone.
+ *   3. Copy the Web app URL into the app: My shop > Google link.
+ *
+ * Updating to a new version of this script (keeps the same link):
+ *   paste the new code over the old, Save, then Deploy > Manage deployments > (pencil) Edit >
+ *   Version: New version > Deploy.
+ */
+const SCRIPT_VERSION = 3;
+
+// Private key shared with the app. Keep it the same in both places.
+const APP_KEY = 'LnmV2a_NTHxVOcipT0zy-LaTZPtJuKXt';
+const FOLDER_NAME = 'Golden Product Invoices';
+const NEW_FOLDER_NAME = 'ShopMate AI';
+const BACKUP_NAME = 'GP Invoices backup.json';
+
+function setup() {
+  getFolder_();
+  ensureTrigger_();
+  Logger.log('Ready. Now deploy this script as a Web app.');
+}
+
+function doGet() {
+  return out_({ ok: true, app: 'gp-invoices', version: SCRIPT_VERSION, message: 'ShopMate AI link is working.' });
+}
+
+function doPost(e) {
+  let req;
+  try { req = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'Bad request' }); }
+  const who = whoIs_(req && req.key);
+  if (!who) return out_({ ok: false, error: 'Wrong app key' });
+  try {
+    if (who.member) return out_(memberAction_(who.member, req));
+    if (who.blocked) return out_({ ok: false, error: 'This device needs to be linked again: on your main phone use Settings > Link another phone.', relink: true });
+    switch (req.action) {
+      case 'ping':
+        ensureTrigger_();
+        return out_({ ok: true, version: SCRIPT_VERSION, email: Session.getEffectiveUser().getEmail(), folder: getFolder_().getUrl() });
+      case 'claim': return out_(claim_(who));
+      case 'members': return out_(members_(req));
+      case 'send': return out_(send_(req));
+      case 'schedule': return out_(schedule_(req));
+      case 'cancel': return out_(cancel_(req));
+      case 'status': return out_(status_(req));
+      case 'backup': return out_(backup_(req));
+      case 'restore': return out_(restore_());
+      case 'photo': return out_(photo_(req));
+      case 'photoGet': return out_(photoGet_(req));
+      default: return out_({ ok: false, error: 'Unknown action' });
+    }
+  } catch (err) {
+    return out_({ ok: false, error: String(err && err.message || err) });
+  }
+}
+
+/* ---------- who is calling ----------
+   Owner devices: APP_KEY + ':' + owner secret (or plain APP_KEY while nobody else has been given access).
+   People you share with: 'm:' + their own token, which only reaches what you ticked for them. */
+function props_() { return PropertiesService.getScriptProperties(); }
+function membersAll_() { try { return JSON.parse(props_().getProperty('members') || '{}'); } catch (err) { return {}; } }
+function whoIs_(key) {
+  key = String(key || '');
+  if (key.indexOf('m:') === 0) {
+    const m = membersAll_()[key.slice(2)];
+    return m ? { member: Object.assign({ token: key.slice(2) }, m) } : { member: { removed: true } };
+  }
+  const secret = props_().getProperty('owner_secret');
+  if (key === APP_KEY) return { owner: true, legacy: true, blocked: !!secret && Object.keys(membersAll_()).length > 0 };
+  if (key.indexOf(APP_KEY + ':') === 0) {
+    if (secret && key.slice(APP_KEY.length + 1) === secret) return { owner: true };
+    if (!secret) return { owner: true, legacy: true };
+    return { owner: true, blocked: true };
+  }
+  return null;
+}
+function claim_(who) {
+  const p = props_();
+  let secret = p.getProperty('owner_secret');
+  if (!secret) { secret = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 8); p.setProperty('owner_secret', secret); }
+  else if (who.legacy) return { ok: false, error: 'Already secured: link this device again from your main phone.' };
+  return { ok: true, secret: secret, version: SCRIPT_VERSION };
+}
+function members_(req) {
+  const p = props_(), all = membersAll_();
+  if (req.op === 'save' && req.member && req.member.token) {
+    const m = req.member;
+    all[m.token] = { name: String(m.name || 'Staff').slice(0, 60), role: String(m.role || '').slice(0, 40), bizIds: (m.bizIds || []).slice(0, 20), perms: m.perms || {}, at: new Date().toISOString() };
+  } else if (req.op === 'remove' && req.token) {
+    delete all[req.token];
+  }
+  p.setProperty('members', JSON.stringify(all));
+  const list = {};
+  Object.keys(all).forEach(function (t) { list[t] = { name: all[t].name, role: all[t].role || '', bizIds: all[t].bizIds, perms: all[t].perms, at: all[t].at }; });
+  return { ok: true, members: list };
+}
+
+/* ---------- what each section covers ---------- */
+const SECTIONS = {
+  customers: { colls: ['customers'], maps: ['usual', 'repeatSkip'] },
+  invoices: { colls: ['invoices', 'reminders'] },
+  takings: { colls: ['takings'] },
+  money: { colls: ['expenses'], maps: ['priceSeen'] },
+  stock: { colls: ['stockLog', 'suppliers', 'orders'] },
+  staff: { colls: ['staff', 'shifts', 'wagePaid'] },
+  food: { colls: ['foodLog', 'maint'] },
+  marketing: { colls: ['ads', 'waGroups', 'broadcasts'] },
+  products: { colls: [] },
+  jobs: { colls: ['jobs', 'defects', 'attendance'] }
+};
+/* private notes to the boss: anyone with jobs access can write one; only the owner (and the writer) sees it */
+const NOTES = 'bossNotes';
+function can_(m, sec, edit) { const p = (m.perms || {})[sec] || {}; return edit ? !!p.e : !!(p.v || p.e); }
+function sectionOf_(coll) { for (const s in SECTIONS) if (SECTIONS[s].colls.indexOf(coll) >= 0) return s; return null; }
+function mapSection_(k) { for (const s in SECTIONS) if ((SECTIONS[s].maps || []).indexOf(k) >= 0) return s; return null; }
+/* which business a record belongs to */
+function bizOfFn_(d) {
+  const first = (((d.settings || {}).businesses || [])[0] || {}).id;
+  const inv = {}, staff = {}, cust = {};
+  (d.invoices || []).forEach(function (i) { inv[i.id] = i.bizId || first; if (i.customerId) (cust[i.customerId] = cust[i.customerId] || {})[i.bizId || first] = 1; });
+  (d.staff || []).forEach(function (w) { staff[w.id] = w.bizId || first; });
+  return function (coll, r) {
+    if (coll === 'customers') { if (r.bizId) return [r.bizId]; const b = Object.keys(cust[r.id] || {}); return b.length ? b : [first]; }
+    if (r.bizId) return [r.bizId];
+    if (r.invoiceId && inv[r.invoiceId]) return [inv[r.invoiceId]];
+    if (r.staffId && staff[r.staffId]) return [staff[r.staffId]];
+    return [first];
+  };
+}
+function inScope_(m, bizList) { return bizList.some(function (b) { return (m.bizIds || []).indexOf(b) >= 0; }); }
+function readMaster_() {
+  const files = getFolder_().getFilesByName(BACKUP_NAME);
+  if (!files.hasNext()) return null;
+  const file = files.next();
+  return { file: file, json: JSON.parse(file.getBlob().getDataAsString()) };
+}
+/* the part of the records a person is allowed to see */
+function filtered_(m, d) {
+  const out = { settings: JSON.parse(JSON.stringify(d.settings || {})) };
+  delete out.settings.link; delete out.settings.people;
+  out.settings.businesses = (out.settings.businesses || []).filter(function (b) { return (m.bizIds || []).indexOf(b.id) >= 0; });
+  const bizOf = bizOfFn_(d);
+  Object.keys(SECTIONS).forEach(function (s) {
+    SECTIONS[s].colls.forEach(function (c) { out[c] = can_(m, s, false) ? (d[c] || []).filter(function (r) { return r && inScope_(m, bizOf(c, r)); }) : []; });
+    (SECTIONS[s].maps || []).forEach(function (k) { out[k] = can_(m, s, false) ? (d[k] || {}) : {}; });
+  });
+  // a supervisor without staff access still needs the crew's names for the site check
+  if (can_(m, 'jobs', false) && !can_(m, 'staff', false)) out.crew = (d.staff || []).filter(function (w) { return w && inScope_(m, bizOf('staff', w)); }).map(function (w) { return { id: w.id, name: w.name, bizId: w.bizId, active: w.active }; });
+  out[NOTES] = (d[NOTES] || []).filter(function (r) { return r && r.byToken === m.token; });
+  out.activeBiz = (m.bizIds || [])[0];
+  return out;
+}
+function memberAction_(m, req) {
+  if (m.removed) return { ok: false, error: 'Your access to this business has been removed.', removed: true };
+  const info = { name: m.name, role: m.role || '', bizIds: m.bizIds, perms: m.perms };
+  if (req.action === 'ping') return { ok: true, version: SCRIPT_VERSION, member: info };
+  if (req.action === 'restore') {
+    const r = readMaster_(); if (!r) return { ok: false, error: 'No records shared yet' };
+    return { ok: true, data: JSON.stringify({ app: 'gp-invoices', version: 2, member: info, data: filtered_(m, r.json.data || r.json) }) };
+  }
+  if (req.action === 'backup') return memberBackup_(m, req, info);
+  if (req.action === 'send' && can_(m, 'invoices', true)) return send_(req);
+  if (req.action === 'photo' && can_(m, 'jobs', true)) return photo_(req);
+  if (req.action === 'photoGet' && can_(m, 'jobs', false)) return photoGet_(req);
+  if ((req.action === 'status' || req.action === 'schedule' || req.action === 'cancel') && can_(m, 'invoices', true)) return req.action === 'status' ? status_(req) : req.action === 'schedule' ? schedule_(req) : cancel_(req);
+  return { ok: false, error: 'You don\'t have access to do that.' };
+}
+/* apply only the records this person changed, in sections they may edit, for their businesses */
+function memberBackup_(m, req, info) {
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const r = readMaster_(); if (!r) return { ok: false, error: 'No records shared yet' };
+    const wrap = r.json, d = wrap.data || wrap;
+    let inc; try { inc = typeof req.data === 'string' ? JSON.parse(req.data) : req.data; } catch (err) { return { ok: false, error: 'Bad data' }; }
+    const md = inc.data || {}, changed = inc.changed || {}, deleted = inc.deleted || {};
+    const bizOf = bizOfFn_(d);
+    let n = 0;
+    Object.keys(SECTIONS).forEach(function (s) {
+      if (!can_(m, s, true)) return;
+      SECTIONS[s].colls.forEach(function (c) {
+        const arr = d[c] = d[c] || [];
+        (changed[c] || []).forEach(function (id) {
+          const rec = (md[c] || []).filter(function (x) { return x && x.id === id; })[0]; if (!rec) return;
+          if (c === 'customers' && !rec.bizId && !bizOf(c, rec).some(function (b) { return (m.bizIds || []).indexOf(b) >= 0; })) rec.bizId = (m.bizIds || [])[0];
+          if (!rec.bizId && ['invoices', 'staff', 'expenses', 'maint', 'foodLog', 'takings', 'jobs', 'defects', 'attendance'].indexOf(c) >= 0) rec.bizId = (m.bizIds || [])[0];
+          const i = arr.findIndex(function (x) { return x && x.id === id; });
+          if (i >= 0 && !inScope_(m, bizOf(c, arr[i]))) return;
+          if (!inScope_(m, bizOf(c, rec))) return;
+          if (i >= 0) arr[i] = rec; else arr.push(rec); n++;
+        });
+        (deleted[c] || []).forEach(function (id) {
+          const i = arr.findIndex(function (x) { return x && x.id === id; });
+          if (i >= 0 && inScope_(m, bizOf(c, arr[i]))) { arr.splice(i, 1); n++; }
+        });
+      });
+      (SECTIONS[s].maps || []).forEach(function (k) { if (inc.maps && inc.maps[k]) { d[k] = Object.assign(d[k] || {}, inc.maps[k]); } });
+    });
+    if (can_(m, 'jobs', true)) {
+      const notes = d[NOTES] = d[NOTES] || [];
+      (changed[NOTES] || []).forEach(function (id) {
+        const rec = (md[NOTES] || []).filter(function (x) { return x && x.id === id; })[0]; if (!rec) return;
+        const i = notes.findIndex(function (x) { return x && x.id === id; });
+        if (i >= 0 && notes[i].byToken !== m.token) return;
+        rec.byToken = m.token; rec.by = m.name; if ((m.bizIds || []).indexOf(rec.bizId) < 0) rec.bizId = (m.bizIds || [])[0];
+        if (i >= 0) notes[i] = rec; else notes.push(rec); n++;
+      });
+      (deleted[NOTES] || []).forEach(function (id) {
+        const i = notes.findIndex(function (x) { return x && x.id === id; });
+        if (i >= 0 && notes[i].byToken === m.token) { notes.splice(i, 1); n++; }
+      });
+    }
+    if (can_(m, 'products', true) && md.settings && md.settings.businesses) {
+      md.settings.businesses.forEach(function (b) {
+        if ((m.bizIds || []).indexOf(b.id) < 0) return;
+        const mine = ((d.settings || {}).businesses || []).filter(function (x) { return x.id === b.id; })[0];
+        if (mine && Array.isArray(b.products)) { mine.products = b.products; n++; }
+      });
+    }
+    (d.settings.businesses || []).forEach(function (b) {
+      const theirs = ((md.settings || {}).businesses || []).filter(function (x) { return x.id === b.id; })[0];
+      if (theirs && (m.bizIds || []).indexOf(b.id) >= 0) b.nextNo = Math.max(parseInt(b.nextNo) || 1, parseInt(theirs.nextNo) || 1);
+    });
+    if (wrap.data) { wrap.data = d; wrap.savedAt = new Date().toISOString(); }
+    r.file.setContent(JSON.stringify(wrap));
+    return { ok: true, at: new Date().toISOString(), applied: n, member: info };
+  } finally { lock.releaseLock(); }
+}
+
+/* Save the PDF to Drive and (if "to" is given) email it. Returns a view link. */
+function send_(req) {
+  const file = savePdf_(req.pdf, req.filename, !!req.shareLink, req.folder);
+  let emailed = false;
+  if (req.to) {
+    GmailApp.sendEmail(req.to, req.subject || 'Invoice', req.body || '', {
+      attachments: [file.getBlob()],
+      name: req.fromName || undefined,
+      replyTo: req.replyTo || undefined
+    });
+    emailed = true;
+  }
+  return { ok: true, emailed: emailed, fileId: file.getId(), fileUrl: req.shareLink ? file.getUrl() : '' };
+}
+
+/* Store a reminder email to be sent later by the timer. */
+function schedule_(req) {
+  if (!req.id || !req.when || !req.to) return { ok: false, error: 'Missing reminder details' };
+  const file = savePdf_(req.pdf, req.filename, false, req.folder);
+  const rem = { id: req.id, when: req.when, to: req.to, subject: req.subject || '', body: req.body || '', fromName: req.fromName || '', replyTo: req.replyTo || '', fileId: file.getId() };
+  PropertiesService.getScriptProperties().setProperty('r_' + req.id, JSON.stringify(rem));
+  ensureTrigger_();
+  return { ok: true };
+}
+
+function cancel_(req) {
+  const p = PropertiesService.getScriptProperties();
+  (req.ids || []).forEach(function (id) { p.deleteProperty('r_' + id); });
+  return { ok: true };
+}
+
+function status_(req) {
+  const p = PropertiesService.getScriptProperties();
+  const res = {};
+  (req.ids || []).forEach(function (id) {
+    const log = p.getProperty('log_' + id);
+    if (log) res[id] = JSON.parse(log);
+    else if (p.getProperty('r_' + id)) res[id] = { status: 'scheduled' };
+  });
+  return { ok: true, items: res };
+}
+
+/* Runs every 5 minutes: sends any reminder emails that are due. */
+function checkReminders() {
+  const p = PropertiesService.getScriptProperties();
+  const all = p.getProperties();
+  const now = Date.now();
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('r_') !== 0) return;
+    let rem;
+    try { rem = JSON.parse(all[k]); } catch (err) { p.deleteProperty(k); return; }
+    if (new Date(rem.when).getTime() > now) return;
+    let log;
+    try {
+      const opts = { name: rem.fromName || undefined, replyTo: rem.replyTo || undefined };
+      try { opts.attachments = [DriveApp.getFileById(rem.fileId).getBlob()]; } catch (err) { /* PDF removed: send without it */ }
+      GmailApp.sendEmail(rem.to, rem.subject, rem.body, opts);
+      log = { status: 'sent', at: new Date().toISOString() };
+    } catch (err) {
+      log = { status: 'failed', at: new Date().toISOString(), error: String(err && err.message || err) };
+    }
+    p.setProperty('log_' + rem.id, JSON.stringify(log));
+    p.deleteProperty(k);
+  });
+  pruneLogs_();
+}
+
+function backup_(req) {
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { return backupLocked_(req); } finally { lock.releaseLock(); }
+}
+function backupLocked_(req) {
+  const folder = getFolder_();
+  const files = folder.getFilesByName(BACKUP_NAME);
+  const content = typeof req.data === 'string' ? req.data : JSON.stringify(req.data);
+  if (files.hasNext()) files.next().setContent(content);
+  else folder.createFile(BACKUP_NAME, content, 'application/json');
+  return { ok: true, at: new Date().toISOString() };
+}
+
+function restore_() {
+  const files = getFolder_().getFilesByName(BACKUP_NAME);
+  if (!files.hasNext()) return { ok: false, error: 'No backup found in Google Drive yet' };
+  return { ok: true, data: files.next().getBlob().getDataAsString() };
+}
+
+/* ---------- job photos: kept in Drive, one folder per business and job ---------- */
+function photo_(req) {
+  if (!req.b64) return { ok: false, error: 'No photo received' };
+  const folder = getSubFolder_(String(req.biz || 'Jobs') + ' photos');
+  const jobName = String(req.job || 'Job').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'Job';
+  const it = folder.getFoldersByName(jobName), sub = it.hasNext() ? it.next() : folder.createFolder(jobName);
+  const name = 'SM-' + String(req.name || Utilities.getUuid()).replace(/[^\w.-]+/g, '') + '.jpg';
+  const file = sub.createFile(Utilities.newBlob(Utilities.base64Decode(req.b64), 'image/jpeg', name));
+  return { ok: true, id: file.getId(), url: file.getUrl() };
+}
+function photoGet_(req) {
+  let file; try { file = DriveApp.getFileById(String(req.id || '')); } catch (err) { return { ok: false, error: 'Photo not found' }; }
+  if (file.getName().indexOf('SM-') !== 0) return { ok: false, error: 'Not a ShopMate photo' };
+  return { ok: true, b64: Utilities.base64Encode(file.getBlob().getBytes()) };
+}
+
+/* ---------- helpers ---------- */
+function savePdf_(b64, filename, shareLink, sub) {
+  if (!b64) throw new Error('No PDF received');
+  const blob = Utilities.newBlob(Utilities.base64Decode(b64), 'application/pdf', filename || 'Invoice.pdf');
+  const folder = sub ? getSubFolder_(sub) : getFolder_();
+  const old = folder.getFilesByName(blob.getName());
+  while (old.hasNext()) old.next().setTrashed(true); // keep only the latest copy of each invoice
+  const file = folder.createFile(blob);
+  if (shareLink) file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return file;
+}
+
+function getFolder_() {
+  const old = DriveApp.getFoldersByName(FOLDER_NAME); // set-ups from before keep their folder
+  if (old.hasNext()) return old.next();
+  const it = DriveApp.getFoldersByName(NEW_FOLDER_NAME);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(NEW_FOLDER_NAME);
+}
+
+/* One folder per business inside the main folder. */
+function getSubFolder_(name) {
+  const clean = String(name).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80);
+  if (!clean) return getFolder_();
+  const parent = getFolder_();
+  const it = parent.getFoldersByName(clean);
+  return it.hasNext() ? it.next() : parent.createFolder(clean);
+}
+
+function ensureTrigger_() {
+  const has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkReminders'; });
+  if (!has) ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
+}
+
+function pruneLogs_() {
+  const p = PropertiesService.getScriptProperties();
+  const all = p.getProperties();
+  const cutoff = Date.now() - 60 * 24 * 3600 * 1000;
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('log_') !== 0) return;
+    try { if (new Date(JSON.parse(all[k]).at).getTime() < cutoff) p.deleteProperty(k); } catch (err) { p.deleteProperty(k); }
+  });
+}
+
+function out_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}

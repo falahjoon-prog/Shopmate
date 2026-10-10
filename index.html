@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Get ShopMate AI</title>
+<meta name="description" content="ShopMate AI: invoices, sales, stock, staff, food safety and an AI helper for your shop. Get it for Android, iPhone or Windows.">
+<meta name="theme-color" content="#1B2230">
+<link rel="icon" href="app/icons/icon-192.png">
+<link rel="apple-touch-icon" href="app/icons/apple-touch-icon.png">
+<meta property="og:title" content="Get ShopMate AI">
+<meta property="og:description" content="Open this link on your phone or computer. It shows the right version for it.">
+<meta property="og:image" content="app/icons/icon-512.png">
+<style>
+:root{--bg:#FBF7EE;--surface:#FFFFFF;--ink:#1B2230;--muted:#5D6573;--line:#E6DFCF;--gold:#E3A21A;--gold-soft:#FBEBC4;--dark:#1B2230}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15110B;--surface:#1F1912;--ink:#F3EEE3;--muted:#B5AC9C;--line:#3A3226;--gold-soft:#3A2D12}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
+.hero{background:var(--dark);color:#fff;padding:calc(28px + env(safe-area-inset-top,0px)) 16px 64px;text-align:center}
+.hero img{width:88px;height:88px;border-radius:22px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.hero h1{margin:14px 0 4px;font-size:30px;letter-spacing:-.01em}
+.hero p{margin:0 auto;max-width:420px;color:#D9D3C6}
+main{max-width:520px;margin:-40px auto 0;padding:0 16px calc(32px + env(safe-area-inset-bottom,0px))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:20px;margin-bottom:14px;box-shadow:0 6px 20px rgba(27,34,48,.07)}
+.card h2{margin:0 0 6px;font-size:21px}
+.tag{display:inline-block;background:var(--gold-soft);color:var(--ink);font-size:13px;font-weight:700;border-radius:999px;padding:3px 10px;margin-bottom:10px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:54px;border-radius:14px;background:var(--gold);color:#1B2230;font-weight:800;font-size:17px;text-decoration:none;border:0;margin:12px 0 6px}
+.btn.alt{background:transparent;border:1.5px solid var(--line);color:var(--ink);font-weight:700;min-height:48px;font-size:16px}
+ol{margin:10px 0 0;padding-left:22px}ol li{margin:6px 0}
+.muted{color:var(--muted);font-size:14px}
+.warn{background:var(--gold-soft);border-radius:12px;padding:12px;margin-top:10px;font-size:15px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:16px;margin-bottom:10px}
+summary{cursor:pointer;padding:16px 18px;font-weight:700;list-style:none;display:flex;justify-content:space-between;align-items:center;min-height:48px}
+summary::after{content:"＋";color:var(--muted)}details[open] summary::after{content:"－"}
+details .in{padding:0 18px 16px}
+.qr{display:none;text-align:center}.qr div{display:inline-block;background:#fff;padding:12px;border-radius:14px;line-height:0}
+.desk .qr{display:block}
+h3{font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:24px 4px 10px}
+footer{text-align:center;color:var(--muted);font-size:13px;padding:8px 16px 24px}
+kbd{font:inherit;font-weight:700}
+</style>
+</head>
+<body>
+<div class="hero">
+  <img src="app/icons/icon-512.png" alt="">
+  <h1>ShopMate AI</h1>
+  <p>Invoices, sales, stock, staff, food safety and an AI helper for your shop.</p>
+</div>
+<main>
+  <div id="mine"></div>
+  <div class="card" id="buyCard" hidden><span class="tag">Subscription</span><h2>Use ShopMate for your business</h2><p class="muted" id="buyPrice" style="margin:0"></p>
+    <a class="btn" id="buyBtn" href="#">Subscribe</a>
+    <p class="muted">Try it free first: every new install has a free trial. After you subscribe, your licence key arrives by email within about 10 minutes. In the app: Settings → Licence &amp; subscription.</p></div>
+  <div class="card qr" id="qrCard"><h2>Putting it on a phone?</h2><p class="muted">Point the phone's camera at this code. It opens this page there and shows the right version.</p><div id="qr"></div></div>
+  <h3 id="otherTitle">Other devices</h3>
+  <div id="others"></div>
+</main>
+<footer>Build 92 · Your records stay on your devices and in your own Google Drive.</footer>
+
+<template id="t-android">
+  <div class="card"><span class="tag">Android phone</span><h2>ShopMate AI for Android</h2>
+    <a class="btn" href="download/ShopMate-AI.apk" download>⬇ Download the app</a>
+    <ol>
+      <li>Tap <b>Download the app</b>. If the phone warns about the file, tap <b>Download anyway</b>.</li>
+      <li>Open the downloaded file, then tap <b>Install</b>.</li>
+      <li>If it asks, allow <b>Install unknown apps</b> for your browser, then go back and tap <b>Install</b>.</li>
+    </ol>
+    <p class="muted">Already have it? Installing this updates it and keeps all your records.</p>
+  </div>
+</template>
+<template id="t-iphone">
+  <div class="card"><span class="tag">iPhone &amp; iPad</span><h2>ShopMate AI for iPhone</h2>
+    <a class="btn" href="app/index.html">Open ShopMate</a>
+    <ol>
+      <li>Tap <b>Open ShopMate</b>.</li>
+      <li>Tap the <b>Share</b> button <span aria-hidden="true">(the square with an arrow)</span> at the bottom of Safari.</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+      <li>From now on, open ShopMate from its new icon on your Home Screen.</li>
+    </ol>
+    <div class="warn" id="iosWarn" hidden>This page is open inside another app. Tap <b>⋯</b> or <b>Share</b> and choose <b>Open in Safari</b> first, so you can add ShopMate to your Home Screen.</div>
+    <p class="muted">Use the Home Screen icon, not Safari: iPhone keeps their data separate. Updates arrive by themselves.</p>
+  </div>
+</template>
+<template id="t-windows">
+  <div class="card"><span class="tag">Windows computer</span><h2>ShopMate AI for Windows</h2>
+    <a class="btn" href="download/ShopMate-AI-Setup.exe" download>⬇ Download for Windows</a>
+    <ol>
+      <li>Run <b>ShopMate-AI-Setup.exe</b> once it has downloaded.</li>
+      <li>If Windows says <b>Windows protected your PC</b>, click <b>More info</b>, then <b>Run anyway</b>.</li>
+      <li>Follow the steps. ShopMate appears on your desktop and Start menu.</li>
+    </ol>
+  </div>
+</template>
+<template id="t-browser">
+  <div class="card"><span class="tag">Mac or any computer</span><h2>Use it in your browser</h2>
+    <p class="muted" style="margin:0">Works in Chrome, Edge or Safari. In Chrome or Edge you can install it from the address bar.</p>
+    <a class="btn alt" href="app/index.html">Open ShopMate in the browser</a>
+  </div>
+</template>
+
+<script src="app/qrcode.js"></script>
+<script>
+(function () {
+  var ua = navigator.userAgent || "";
+  var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var android = /Android/.test(ua);
+  var windows = /Windows/.test(ua);
+  var inApp = /FBAN|FBAV|Instagram|Line\/|Snapchat|GSA\/|; wv\)/.test(ua);
+  var mine = ios ? "iphone" : android ? "android" : windows ? "windows" : "browser";
+  var all = ["android", "iphone", "windows", "browser"];
+  var names = { android: "Android phone", iphone: "iPhone or iPad", windows: "Windows computer", browser: "Mac or other computer (browser)" };
+  function tpl(k) { return document.getElementById("t-" + k).content.cloneNode(true); }
+  document.getElementById("mine").appendChild(tpl(mine));
+  if (ios && inApp) { var w = document.getElementById("iosWarn"); if (w) w.hidden = false; }
+  var others = document.getElementById("others");
+  all.filter(function (k) { return k !== mine; }).forEach(function (k) {
+    var d = document.createElement("details"), s = document.createElement("summary"), i = document.createElement("div");
+    s.textContent = names[k]; i.className = "in";
+    var t = tpl(k), c = t.querySelector(".card"); while (c.firstChild) i.appendChild(c.firstChild);
+    var tag = i.querySelector(".tag"); if (tag) tag.remove();
+    d.appendChild(s); d.appendChild(i); others.appendChild(d);
+  });
+  fetch("licence.json?t=" + Date.now()).then(function (r) { return r.json(); }).then(function (c) {
+    if (!c || !c.buy) return;
+    document.getElementById("buyBtn").href = c.buy;
+    document.getElementById("buyPrice").textContent = [c.price, c.priceNote].filter(Boolean).join(" · ");
+    document.getElementById("buyCard").hidden = false;
+  }).catch(function () { });
+  if (!ios && !android) {
+    document.body.classList.add("desk");
+    try { var q = qrcode(0, "M"); q.addData(location.href.split("#")[0]); q.make(); document.getElementById("qr").innerHTML = q.createSvgTag({ cellSize: 5, margin: 1, scalable: true }).replace("<svg ", '<svg style="width:200px;height:auto" '); } catch (e) { document.getElementById("qrCard").style.display = "none"; }
+  }
+})();
+</script>
+</body>
+</html>

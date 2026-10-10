@@ -1,0 +1,196 @@
+/**
+ * ShopMate AI — licence server
+ *
+ * Runs in YOUR Google account (a separate Apps Script project from the app's Google link).
+ *  - Keeps every licence in a Google Sheet called "ShopMate licences" (you can read and edit it).
+ *  - Every 10 minutes it asks Stripe for new subscriptions: it makes a licence key and emails it to them.
+ *  - When a subscription ends or stops being paid, the licence is switched off.
+ *  - The app asks it whether a key is valid (up to MAX_DEVICES phones/computers per licence;
+ *    staff linked through People & access don't count).
+ *
+ * Set-up (once):
+ *  1. Paste this into a new Apps Script project, Save.
+ *  2. Project Settings → Script properties: add STRIPE_SECRET_KEY (your Stripe secret key, sk_live_… or sk_test_…).
+ *  3. Run setup() once and allow access. The log shows your own lifetime key.
+ *  4. Deploy → New deployment → Web app, Execute as: Me, Who has access: Anyone. Copy the /exec link.
+ *  (No Stripe webhook needed: setup() adds a 10-minute check.)
+ */
+const SHEET_NAME = 'ShopMate licences';
+const MAX_DEVICES = 5;
+const GRACE_DAYS = 3;
+const DEFAULT_BUSINESSES = 1; // businesses one key covers when the sheet's 'businesses' cell is empty (0 = no limit)
+const COLS = ['key', 'email', 'status', 'until', 'plan', 'devices', 'customer', 'subscription', 'created', 'note', 'businesses'];
+
+function setup() {
+  const sh = sheet_();
+  const me = Session.getEffectiveUser().getEmail();
+  let row = rows_().find(function (r) { return r.plan === 'owner'; });
+  if (!row) { row = { key: newKey_(), email: me, status: 'active', until: '', plan: 'owner', devices: '[]', customer: '', subscription: '', created: new Date().toISOString(), note: 'Your own licence (never expires)' }; append_(row); }
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'pollStripe'; })) ScriptApp.newTrigger('pollStripe').timeBased().everyMinutes(10).create();
+  if (!props_().getProperty('since')) props_().setProperty('since', String(Math.floor(Date.now() / 1000) - 3 * 86400));
+  Logger.log('Licence sheet: ' + SpreadsheetApp.openById(props_().getProperty('sheet')).getUrl());
+  Logger.log('Your own lifetime key: ' + row.key);
+}
+
+function doGet() { return out_({ ok: true, app: 'shopmate-licence' }); }
+
+function doPost(e) {
+  let req;
+  try { req = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'Bad request' }); }
+  try {
+    if (req && req.action === 'check') return out_(check_(req));
+    if (req && (req.action === 'issue' || req.action === 'list' || req.action === 'setStatus' || req.action === 'setBiz')) return out_(admin_(req));
+    return out_({ ok: false, error: 'Unknown request' });
+  } catch (err) {
+    return out_({ ok: false, error: String(err && err.message || err) });
+  }
+}
+
+/* ---------- the app asks: is this key good? ---------- */
+function check_(req) {
+  const key = String(req.key || '').trim().toUpperCase(), device = String(req.device || '').slice(0, 60);
+  if (!/^SM(-[A-Z0-9]{4}){3}$/.test(key)) return { ok: true, status: 'invalid', message: "That doesn't look like a ShopMate licence key." };
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const r = rows_().find(function (x) { return x.key === key; });
+    if (!r) return { ok: true, status: 'invalid', message: "That licence key wasn't found. Check it, or contact us." };
+    // the subscription may have renewed without us hearing: ask Stripe before saying it has ended
+    if (r.subscription && r.status === 'active' && r.until && new Date(r.until) < new Date()) refreshSub_(r);
+    const live = r.status === 'active' && (!r.until || new Date(r.until).getTime() + GRACE_DAYS * 864e5 > Date.now());
+    let devices = []; try { devices = JSON.parse(r.devices || '[]'); } catch (err) { }
+    if (live && device && devices.indexOf(device) < 0) {
+      if (devices.length >= MAX_DEVICES && r.plan !== 'owner') return { ok: true, status: 'full', message: 'This licence is already used on ' + MAX_DEVICES + ' devices. Remove one by contacting us, or buy another licence.' };
+      devices.push(device); r.devices = JSON.stringify(devices); save_(r);
+    }
+    return { ok: true, status: live ? 'active' : 'lapsed', until: r.until || '', plan: r.plan || '', email: mask_(r.email), businesses: bizOf_(r), message: live ? '' : 'This subscription has ended. Renew it to keep adding and changing records.' };
+  } finally { lock.releaseLock(); }
+}
+
+/* ---------- for you, from the app: make keys, see them, switch them off (only with your own owner key) ---------- */
+function admin_(req) {
+  const own = String(req.ownerKey || '').trim().toUpperCase();
+  const lock = LockService.getScriptLock(); lock.waitLock(15000);
+  try {
+    const all = rows_();
+    if (!own || !all.some(function (r) { return r.key === own && r.plan === 'owner' && r.status === 'active'; })) return { ok: false, error: 'Only the owner licence can do that.' };
+    if (req.action === 'issue') {
+      const email = String(req.email || '').trim().slice(0, 120), months = Math.max(0, Math.min(120, parseInt(req.months, 10) || 0));
+      const r = { key: newKey_(), email: email, status: 'active', until: months ? new Date(Date.now() + months * 30.5 * 864e5).toISOString() : '', plan: months ? 'manual ' + months + ' mo' : 'manual lifetime', devices: '[]', customer: '', subscription: '', created: new Date().toISOString(), note: String(req.note || '').slice(0, 200), businesses: String(bizIn_(req.businesses)) };
+      append_(r);
+      let emailed = false;
+      if (req.sendEmail && /@/.test(email)) { try { sendKey_(email, r.key); emailed = true; } catch (err) { } }
+      return { ok: true, key: r.key, until: r.until, emailed: emailed, businesses: bizOf_(r) };
+    }
+    if (req.action === 'setStatus') {
+      const r = all.find(function (x) { return x.key === String(req.key || '').trim().toUpperCase(); });
+      if (!r || r.plan === 'owner') return { ok: false, error: 'Licence not found' };
+      r.status = req.status === 'active' ? 'active' : 'lapsed'; save_(r);
+      return { ok: true, key: r.key, status: r.status };
+    }
+    if (req.action === 'setBiz') {
+      const r = all.find(function (x) { return x.key === String(req.key || '').trim().toUpperCase(); });
+      if (!r || r.plan === 'owner') return { ok: false, error: 'Licence not found' };
+      r.businesses = String(bizIn_(req.businesses)); save_(r);
+      return { ok: true, key: r.key, businesses: bizOf_(r) };
+    }
+    return { ok: true, items: all.filter(function (r) { return r.plan !== 'owner'; }).slice(-100).reverse().map(function (r) {
+      let n = 0; try { n = JSON.parse(r.devices || '[]').length; } catch (err) { }
+      return { key: r.key, email: r.email, status: r.status, until: r.until, plan: r.plan, devices: n, note: r.note, created: r.created, businesses: bizOf_(r) };
+    }) };
+  } finally { lock.releaseLock(); }
+}
+
+/* ---------- Stripe: every 10 minutes, new paid sign-ups get a key; subscriptions are re-checked daily ---------- */
+function stripe_(path, method, payload) {
+  const sk = props_().getProperty('STRIPE_SECRET_KEY');
+  if (!sk) throw new Error('STRIPE_SECRET_KEY is not set');
+  const r = UrlFetchApp.fetch('https://api.stripe.com/v1/' + path, { method: method || 'get', headers: { Authorization: 'Bearer ' + sk }, payload: payload, muteHttpExceptions: true });
+  const j = JSON.parse(r.getContentText());
+  if (r.getResponseCode() >= 300) throw new Error((j.error && j.error.message) || 'Stripe error ' + r.getResponseCode());
+  return j;
+}
+function pollStripe() {
+  const p = props_();
+  if (!p.getProperty('STRIPE_SECRET_KEY')) return;
+  const lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;
+  try {
+    const since = parseInt(p.getProperty('since') || '0', 10) - 600; // overlap a little: nothing is missed
+    let after = '', newest = since, more = true, guard = 0;
+    const subs = {}; rows_().forEach(function (r) { if (r.subscription) subs[r.subscription] = 1; });
+    while (more && guard++ < 20) {
+      const page = stripe_('checkout/sessions?limit=100&status=complete&created[gte]=' + since + (after ? '&starting_after=' + after : ''));
+      (page.data || []).forEach(function (o) {
+        newest = Math.max(newest, o.created || 0);
+        if (o.mode !== 'subscription' || !o.subscription || subs[o.subscription]) return;
+        const sub = stripe_('subscriptions/' + encodeURIComponent(o.subscription));
+        const email = (o.customer_details && o.customer_details.email) || o.customer_email || '';
+        const r = { key: newKey_(), email: email, status: 'active', until: periodEnd_(sub), plan: planName_(sub), devices: '[]', customer: o.customer || '', subscription: o.subscription, created: new Date().toISOString(), note: o.client_reference_id ? 'ref ' + o.client_reference_id : '' };
+        applySub_(r, sub, false); append_(r); subs[o.subscription] = 1;
+        if (email) sendKey_(email, r.key);
+      });
+      more = !!page.has_more; if (more) after = page.data[page.data.length - 1].id;
+    }
+    p.setProperty('since', String(newest));
+    // once a day: bring every subscription's status up to date (cancelled, unpaid, renewed)
+    const day = new Date().toISOString().slice(0, 10);
+    if (p.getProperty('swept') !== day) {
+      rows_().forEach(function (r) { if (r.subscription) refreshSub_(r); });
+      p.setProperty('swept', day);
+    }
+  } finally { lock.releaseLock(); }
+}
+function refreshSub_(r) { try { applySub_(r, stripe_('subscriptions/' + encodeURIComponent(r.subscription)), false); save_(r); } catch (err) { } }
+function applySub_(r, sub, deleted) {
+  const st = sub.status;
+  r.status = !deleted && (st === 'active' || st === 'trialing' || st === 'past_due') ? 'active' : 'lapsed';
+  r.until = periodEnd_(sub) || r.until;
+  r.plan = planName_(sub) || r.plan;
+}
+function periodEnd_(sub) {
+  const t = sub.current_period_end || (sub.items && sub.items.data && sub.items.data[0] && sub.items.data[0].current_period_end);
+  return t ? new Date(t * 1000).toISOString() : '';
+}
+function planName_(sub) { try { const it = sub.items.data[0]; return (it.price.nickname || it.price.recurring.interval || 'subscription'); } catch (err) { return 'subscription'; } }
+function bizIn_(v) { const n = parseInt(v, 10); return isNaN(n) ? DEFAULT_BUSINESSES : Math.max(0, Math.min(999, n)); }
+function bizOf_(r) { if (r.plan === 'owner') return 0; return r.businesses === '' || r.businesses == null ? DEFAULT_BUSINESSES : bizIn_(r.businesses); }
+function sendKey_(email, key) {
+  GmailApp.sendEmail(email, 'Your ShopMate AI licence key',
+    'Thank you for subscribing to ShopMate AI.\n\nYour licence key:\n\n    ' + key + '\n\n' +
+    'In the app: Settings → Licence & subscription → Enter licence key, and paste it in.\n' +
+    'One key works on up to ' + MAX_DEVICES + ' of your phones and computers. Staff you add through People & access don\'t need their own.\n\n' +
+    'Get the app: https://falahjoon-prog.github.io/Shopmate/\n');
+}
+
+/* ---------- the sheet ---------- */
+function props_() { return PropertiesService.getScriptProperties(); }
+function sheet_() {
+  const p = props_(); let id = p.getProperty('sheet'), ss = null;
+  if (id) { try { ss = SpreadsheetApp.openById(id); } catch (err) { ss = null; } }
+  if (!ss) { ss = SpreadsheetApp.create(SHEET_NAME); p.setProperty('sheet', ss.getId()); const s = ss.getSheets()[0]; s.setName('Licences'); s.appendRow(COLS); s.setFrozenRows(1); }
+  const s0 = ss.getSheets()[0];
+  if (s0.getLastColumn() < COLS.length) s0.getRange(1, 1, 1, COLS.length).setValues([COLS]);
+  return s0;
+}
+function rows_() {
+  const sh = sheet_(), v = sh.getDataRange().getValues();
+  return v.slice(1).map(function (a, i) { const o = { _row: i + 2 }; COLS.forEach(function (c, j) { o[c] = a[j] instanceof Date ? a[j].toISOString() : String(a[j] == null ? '' : a[j]); }); o.key = o.key.trim().toUpperCase(); o.status = o.status.trim().toLowerCase(); return o; });
+}
+function append_(r) { sheet_().appendRow(COLS.map(function (c) { return r[c] || ''; })); }
+function save_(r) { sheet_().getRange(r._row, 1, 1, COLS.length).setValues([COLS.map(function (c) { return r[c] || ''; })]); }
+function newKey_() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', taken = {};
+  rows_().forEach(function (r) { taken[r.key] = 1; });
+  for (;;) {
+    let k = 'SM'; for (let g = 0; g < 3; g++) { k += '-'; for (let i = 0; i < 4; i++) k += A.charAt(Math.floor(Math.random() * A.length)); }
+    if (!taken[k]) return k;
+  }
+}
+function mask_(e) { e = String(e || ''); const i = e.indexOf('@'); return i > 1 ? e.charAt(0) + '•••' + e.slice(i) : e; }
+function out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+
+/* ---------- for you: make a key by hand (Run → issueKey after editing the email) ---------- */
+function issueKey() {
+  const email = 'someone@example.com', months = 12;
+  const r = { key: newKey_(), email: email, status: 'active', until: new Date(Date.now() + months * 30.5 * 864e5).toISOString(), plan: 'manual', devices: '[]', customer: '', subscription: '', created: new Date().toISOString(), note: 'issued by hand' };
+  append_(r); Logger.log(r.key);
+}
