@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ShopMate AI · Live measure</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font:15px/1.45 Roboto,system-ui,sans-serif;background:#F8F9FA;color:#202124}
+.start{max-width:520px;margin:0 auto;padding:28px 20px}
+h1{font-size:22px;font-weight:500;margin:0 0 6px}
+p{color:#5F6368;margin:0 0 14px}
+.btn{width:100%;min-height:52px;border-radius:26px;border:1px solid #DADCE0;background:#fff;color:#1A73E8;font:500 16px Roboto,sans-serif;margin-top:10px}
+.btn.pri{background:#1A73E8;border-color:#1A73E8;color:#fff}
+.steps{background:#fff;border:1px solid #DADCE0;border-radius:16px;padding:6px 16px;margin:14px 0}
+.steps div{padding:10px 0;border-bottom:1px solid #E8EAED}.steps div:last-child{border:0}
+#ov{position:fixed;inset:0;display:none;pointer-events:none;color:#202124}
+#ov.on{display:block}
+#ov .top{position:absolute;top:0;left:0;right:0;padding:16px 12px 0;display:flex;align-items:center;gap:8px;pointer-events:auto}
+#ov .x{width:44px;height:44px;border-radius:50%;border:0;background:rgba(0,0,0,.4);color:#fff;font-size:22px}
+#ov .ttl{flex:1;text-align:center;color:#fff;font-weight:500;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+#ov .tip{position:absolute;top:76px;left:16px;right:16px;background:rgba(32,33,36,.78);color:#fff;border-radius:14px;padding:10px 14px;font-size:14px}
+#ov .bot{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:24px 24px 0 0;padding:14px 16px 22px;pointer-events:auto}
+#sides{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;min-height:46px}
+#sides div{flex:0 0 auto;min-width:64px;border:1px solid #DADCE0;border-radius:12px;padding:4px 8px;text-align:center}
+#sides small{display:block;font-size:11px;color:#5F6368}#sides b{font-weight:500}
+.ctl{display:flex;align-items:center;gap:14px}
+.rb{width:52px;height:52px;border-radius:50%;border:1px solid #DADCE0;background:#fff;font-size:20px;color:#202124}
+.rb.ok{color:#1A73E8}
+.add{flex:1;height:64px;border-radius:32px;border:0;background:#1A73E8;color:#fff;font:500 17px Roboto,sans-serif}
+.add:disabled,.rb:disabled,.btn:disabled{opacity:.4}
+.lbl{position:absolute;transform:translate(-50%,-50%);background:#fff;border-radius:14px;padding:3px 10px;font-weight:500;font-size:14px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+</style>
+</head>
+<body>
+<div class="start" id="start">
+  <h1 id="h">Live camera measure</h1>
+  <p id="sub">Measure with the camera, then go back to ShopMate.</p>
+  <div class="steps" id="how"></div>
+  <button class="btn pri" id="go">Start camera</button>
+  <button class="btn" id="cancel">Back to ShopMate</button>
+  <p id="msg" style="margin-top:14px;color:#A50E0E"></p>
+</div>
+<div id="ov">
+  <div class="top"><button class="x" id="xx" aria-label="Stop">✕</button><div class="ttl" id="ttl"></div><span style="width:44px"></span></div>
+  <div class="tip" id="tip">Move the phone slowly so it can find the surface.</div>
+  <div id="labels"></div>
+  <div class="bot"><div id="sides"></div>
+    <div class="ctl"><button class="rb" id="undo" aria-label="Undo">↶</button><button class="add" id="add" disabled>＋ Add corner</button><button class="rb ok" id="done" aria-label="Done" disabled>✓</button></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  const Q = new URLSearchParams(location.search), LINE = Q.get("m") === "line", SURF = Q.get("s") || "floor", TITLE = Q.get("t") || "";
+  const PKG = "au.com.goldenproduct.invoices";
+  const $ = id => document.getElementById(id);
+  $("ttl").textContent = TITLE; $("h").textContent = "Live camera · " + (LINE ? "wall height" : SURF);
+  $("how").innerHTML = (LINE ? ["Point the phone at the wall.", "Aim the circle at the bottom of the wall and tap Add.", "Aim at the top of the wall and tap Add.", "Tap ✓ to go back to ShopMate."]
+    : ["Point the phone at the " + SURF + " and move it slowly until the circle appears.", "Tap the screen on a corner, or aim the circle at it and tap Add corner. No corner to see (behind furniture)? Tap where it would be on the floor.", "Walk around the room and add each corner in order.", "Tap ✓ (or the first corner again) to finish and go back to ShopMate."]).map((t, i) => "<div>" + (i + 1) + ". " + t + "</div>").join("");
+  $("add").textContent = LINE ? "＋ Add point" : "＋ Add corner";
+
+  function back(data) { location.href = "intent://ar?d=" + encodeURIComponent(JSON.stringify(data)) + "#Intent;scheme=shopmate;package=" + PKG + ";end"; }
+  $("cancel").onclick = () => back({ cancel: true });
+
+  if (!navigator.xr || !window.THREE) { $("go").disabled = true; $("msg").textContent = !window.THREE ? "No internet connection - live measuring needs internet to start." : "This phone or browser can't do live camera measuring. Open this in Chrome, or go back and use \"From a photo\"."; }
+  else navigator.xr.isSessionSupported("immersive-ar").then(ok => { if (!ok) { $("go").disabled = true; $("msg").textContent = "This phone can't do live camera measuring (it needs Google Play Services for AR). Go back and use \"From a photo\"."; } }).catch(() => { });
+
+  let renderer, scene, camera, reticle, session, hitSource = null, refSpace = null, hit = null, real = false, plane = null;
+  const UP = new THREE.Vector3(0, 1, 0), tmpQ = new THREE.Quaternion();
+  const pts = [], dots = [], lines = [];
+  const matDot = new THREE.MeshBasicMaterial({ color: 0x1A73E8 }), matLine = new THREE.LineBasicMaterial({ color: 0xffffff });
+
+  $("go").onclick = async () => {
+    try {
+      session = await navigator.xr.requestSession("immersive-ar", { requiredFeatures: ["hit-test"], optionalFeatures: ["dom-overlay"], domOverlay: { root: $("ov") } });
+    } catch (e) { $("msg").textContent = "Could not start the camera: " + (e && e.message || e); return; }
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(window.innerWidth, window.innerHeight); renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+    scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 40);
+    reticle = new THREE.Mesh(new THREE.RingGeometry(0.035, 0.05, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+    reticle.add(new THREE.AxesHelper(0.08));   // small X (red) Y (green) Z (blue) sign where the point will go
+    renderer.xr.setReferenceSpaceType("local");
+    await renderer.xr.setSession(session);
+    $("start").style.display = "none"; $("ov").classList.add("on");
+    const viewer = await session.requestReferenceSpace("viewer");
+    hitSource = await session.requestHitTestSource({ space: viewer });
+    refSpace = renderer.xr.getReferenceSpace();
+    // a tap on the camera picture (not on the buttons) places a point there
+    session.addEventListener("select", tapPlace);
+    document.querySelectorAll("#ov .top,#ov .bot").forEach(el => el.addEventListener("beforexrselect", e => e.preventDefault()));
+    session.addEventListener("end", () => { $("ov").classList.remove("on"); $("start").style.display = ""; });
+    renderer.setAnimationLoop(frame);
+  };
+  function frame(t, xf) {
+    if (xf && hitSource) {
+      const r = xf.getHitTestResults(hitSource);
+      if (r.length) {
+        const pose = r[0].getPose(refSpace); reticle.visible = true; reticle.matrix.fromArray(pose.transform.matrix); hit = new THREE.Vector3().setFromMatrixPosition(reticle.matrix); real = true;
+        if (!plane || !pts.length) plane = { p: hit.clone(), n: new THREE.Vector3().setFromMatrixColumn(reticle.matrix, 1).normalize() };
+      } else {
+        // no surface found here: aim on the level already found (the floor / ceiling, or the wall for the second height point)
+        const vp = xf.getViewerPose(refSpace), P = surface();
+        hit = vp && P ? onPlane(new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().fromArray(vp.transform.matrix)), new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion().copy(vp.transform.orientation)), P) : null;
+        real = false; reticle.visible = !!hit; if (hit) { tmpQ.setFromUnitVectors(UP, P.n); reticle.matrix.compose(hit, tmpQ, new THREE.Vector3(1, 1, 1)); }
+      }
+      reticle.material.color.set(real ? 0xffffff : 0xFBBC04);
+      const full = LINE ? pts.length >= 2 : false;
+      $("add").disabled = !hit || full;
+      if (hit && !LINE && pts.length >= 3 && hit.distanceTo(pts[0]) < 0.12) { $("tip").textContent = "Tap Add corner to close the room here."; }
+      else $("tip").textContent = !hit ? "Move the phone slowly so it can find the surface." : !real ? "No surface here - the point goes on the level already found (yellow). Tap the screen or Add." : LINE ? (pts.length ? "Aim at the top of the wall and tap Add point." : "Aim at the bottom of the wall and tap Add point.") : pts.length ? "Aim at the next corner and tap Add corner." : "Aim the circle at the first corner and tap Add corner.";
+    }
+    renderer.render(scene, camera);
+    labels();
+  }
+  function labels() {
+    const cam = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera, W = window.innerWidth, H = window.innerHeight;
+    const segs = []; for (let i = 0; i + 1 < pts.length; i++) segs.push([pts[i], pts[i + 1]]);
+    let h = "";
+    segs.forEach(([a, b]) => { const m = a.clone().add(b).multiplyScalar(0.5).project(cam); if (m.z < 1) h += '<div class="lbl" style="left:' + ((m.x + 1) / 2 * W) + "px;top:" + ((1 - m.y) / 2 * H) + 'px">' + a.distanceTo(b).toFixed(2) + " m</div>"; });
+    $("labels").innerHTML = h;
+  }
+  function redraw() {
+    lines.forEach(l => scene.remove(l)); lines.length = 0;
+    for (let i = 0; i + 1 < pts.length; i++) { const g = new THREE.BufferGeometry().setFromPoints([pts[i], pts[i + 1]]); const l = new THREE.Line(g, matLine); scene.add(l); lines.push(l); }
+    const s = sides(); $("sides").innerHTML = s.map((v, i) => "<div><small>" + (LINE ? "Height" : "Side " + String.fromCharCode(65 + i)) + "</small><b>" + v.toFixed(2) + "</b></div>").join("") + (LINE ? "" : "<div><small>Side " + String.fromCharCode(65 + s.length) + "</small><b>…</b></div>");
+    $("done").disabled = LINE ? pts.length < 2 : pts.length < 3;
+    $("undo").disabled = !pts.length;
+  }
+  function sides() { const s = []; for (let i = 0; i + 1 < pts.length; i++) s.push(pts[i].distanceTo(pts[i + 1])); return s; }
+  // the plane a point goes on when no surface is found: the room's first corner level, or (wall height) an upright plane through the bottom point
+  function surface() {
+    if (LINE && pts.length) { const c = new THREE.Vector3().setFromMatrixPosition(renderer.xr.getCamera(camera).matrixWorld), n = c.clone().sub(pts[0]); n.y = 0; if (n.lengthSq() < 1e-6) return null; return { p: pts[0], n: n.normalize() }; }
+    return plane;
+  }
+  function onPlane(o, d, P) { const den = d.dot(P.n); if (Math.abs(den) < 1e-4) return null; const t = P.p.clone().sub(o).dot(P.n) / den; return t > 0.05 && t < 15 ? o.clone().add(d.multiplyScalar(t)) : null; }
+  function tapPlace(e) {
+    const P = surface(); if (!P || !e.frame) { $("tip").textContent = "Move the phone slowly over the floor first, so it can find the level."; return; }
+    const pose = e.frame.getPose(e.inputSource.targetRaySpace, refSpace); if (!pose) return;
+    const m = new THREE.Matrix4().fromArray(pose.transform.matrix), o = new THREE.Vector3().setFromMatrixPosition(m), d = new THREE.Vector3(0, 0, -1).transformDirection(m);
+    const p = onPlane(o, d, P); if (p) addPoint(p);
+  }
+  $("add").onclick = () => { if (hit) addPoint(hit); };
+  function addPoint(at) {
+    if (!LINE && pts.length >= 3 && at.distanceTo(pts[0]) < 0.12) { finish(); return; }
+    if (LINE && pts.length >= 2) return;
+    const p = at.clone(); if (!pts.length && plane && !LINE) plane = { p: p.clone(), n: plane.n };   // every corner of a floor / ceiling sits on the first corner's level
+    pts.push(p);
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.018, 16, 12), matDot); d.position.copy(p); scene.add(d); dots.push(d);
+    if (navigator.vibrate) navigator.vibrate(20);
+    redraw();
+  }
+  $("undo").onclick = () => { if (!pts.length) return; pts.pop(); scene.remove(dots.pop()); redraw(); };
+  $("done").onclick = finish;
+  $("xx").onclick = () => { if (session) session.end(); };
+  function finish() {
+    if (LINE) { if (pts.length < 2) return; back({ len: +pts[0].distanceTo(pts[1]).toFixed(3) }); return; }
+    if (pts.length < 3) return;
+    const n = pts.length, s = []; for (let i = 0; i < n; i++) s.push(pts[i].distanceTo(pts[(i + 1) % n]));
+    // area: Newell's method (works for floor, ceiling or wall), and the outline flattened onto that plane for the drawing
+    const N = new THREE.Vector3(); for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; N.x += (a.y - b.y) * (a.z + b.z); N.y += (a.z - b.z) * (a.x + b.x); N.z += (a.x - b.x) * (a.y + b.y); }
+    const area = N.length() / 2; N.normalize();
+    const u = pts[1].clone().sub(pts[0]); u.sub(N.clone().multiplyScalar(u.dot(N))).normalize(); const v = N.clone().cross(u);
+    const flat = pts.map(p => { const d = p.clone().sub(pts[0]); return [+d.dot(u).toFixed(3), +d.dot(v).toFixed(3)]; });
+    back({ sides: s.map(x => +x.toFixed(3)), perimeter: +s.reduce((a, b) => a + b, 0).toFixed(3), area: +area.toFixed(3), pts: flat });
+  }
+})();
+</script>
+</body>
+</html>

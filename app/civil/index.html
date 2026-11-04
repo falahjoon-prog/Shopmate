@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0F5FA8">
+<title>ShopMate AI · Civil Estimator</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--ink:#1c2430;--mute:#667085;--line:#d9dde3;--acc:#0f5fa8;--ok:#1a7f4b;--bad:#b42318}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--acc);color:#fff;padding:12px 16px}
+header h1{margin:0;font-size:18px}
+header input{margin-top:6px;width:min(420px,100%);padding:6px 8px;border:0;border-radius:4px}
+nav{display:flex;flex-wrap:wrap;gap:4px;padding:8px 16px;background:#fff;border-bottom:1px solid var(--line)}
+nav button{border:1px solid var(--line);background:#fff;padding:7px 12px;border-radius:4px;cursor:pointer}
+nav button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+main{padding:16px;max-width:1000px;margin:auto}
+.tab{display:none}.tab.active{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:12px;margin-bottom:12px;overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:4px 6px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--mute);font-weight:600}
+td input{width:100%;min-width:70px;padding:5px;border:1px solid var(--line);border-radius:3px}
+td.num,th.num{text-align:right}
+button.btn{background:var(--acc);color:#fff;border:0;padding:7px 12px;border-radius:4px;cursor:pointer;margin:4px 6px 0 0}
+button.x{background:none;border:0;color:var(--bad);cursor:pointer;font-size:16px}
+.sum{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}
+.sum div{background:#eef3f9;padding:8px 12px;border-radius:4px}
+.sum b{display:block;font-size:16px}
+.tot td{font-weight:700;border-top:2px solid var(--ink)}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+textarea{width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;font:12px/1.4 monospace;margin:4px 0}
+@media print{header input,nav,.noprint{display:none!important}body{background:#fff}.card{border:0}}
+</style>
+</head>
+<body>
+<header>
+  <a href="../index.html" style="color:#fff;text-decoration:none;font-size:13px">&larr; Back to ShopMate AI</a>
+  <h1>Civil estimator: earthworks, pipes, pavements</h1>
+  <input id="project" placeholder="Project name">
+</header>
+<nav class="noprint" id="nav">
+  <button data-t="earth" class="on">Earthworks</button>
+  <button data-t="surf">Surfaces</button>
+  <button data-t="road">Road</button>
+  <button data-t="pipes">Pipes</button>
+  <button data-t="net">Pipe network</button>
+  <button data-t="pave">Pavements and kerbs</button>
+  <button data-t="struct">Structures</button>
+  <button data-t="quote">Rates and quote</button>
+  <button data-t="test">Self-test</button>
+</nav>
+<main>
+  <section class="tab active" id="tab-earth">
+    <div class="card">
+      <p>Cross-section areas at each chainage (m, m²). Volumes use the average end area method.</p>
+      <div id="t-sections"></div>
+      <button class="btn noprint" data-add="sections">Add section</button>
+      <div class="sum" id="s-earth"></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-surf">
+    <div class="card">
+      <p>Survey surfaces: paste points as <b>X, Y, Z</b> (or <b>ID, X, Y, Z</b>), one per line, or load a .csv, .txt or .dxf file (DXF points, 3D faces and 3D polyline vertices).</p>
+      <p><b>Existing ground</b></p>
+      <textarea id="eg" rows="6" data-surf="egText" placeholder="X, Y, Z"></textarea>
+      <input type="file" id="egFile" accept=".csv,.txt,.xyz,.dxf" class="noprint">
+      <p><b>Design surface</b></p>
+      <label><input type="radio" name="dm" value="level" data-surf="dmode" checked> Flat level (pad)</label>
+      <input id="dgLevel" data-surf="dgLevel" type="number" step="any" style="width:110px;padding:5px">
+      <br>
+      <label><input type="radio" name="dm" value="pts" data-surf="dmode"> Design points</label>
+      <textarea id="dg" rows="4" data-surf="dgText" placeholder="X, Y, Z"></textarea>
+      <input type="file" id="dgFile" accept=".csv,.txt,.xyz,.dxf" class="noprint">
+      <p><label>Contour every (m) <input id="ci" data-surf="contourInt" type="number" step="any" style="width:80px;padding:5px"></label> <label>Grid size (m) <input id="cs" data-surf="cs" type="number" step="any" value="1" style="width:80px;padding:5px"></label></p>
+      <button class="btn noprint" id="b-surf">Calculate cut and fill</button>
+      <label class="noprint"><input type="checkbox" id="useSurf"> Use these volumes in the quote</label>
+      <div class="sum" id="s-surf"></div>
+      <canvas id="plan" width="640" height="420" style="width:100%;max-width:640px;border:1px solid var(--line);margin-top:8px"></canvas>
+      <p class="noprint" style="color:var(--mute);font-size:12px">Red = cut (ground above design), blue = fill. Grey lines are the triangles of the existing ground surface, green lines are contours.</p>
+    </div>
+  </section>
+  <section class="tab" id="tab-road">
+    <div class="card">
+      <p><b>Alignment</b>: East and North in m, set a curve radius at a point to put a circular curve there. Uses the existing ground from the Surfaces tab.</p>
+      <div id="t-al"></div><button class="btn noprint" data-add="al">Add point</button>
+      <input type="file" id="alFile" accept=".dxf" class="noprint"> <span class="noprint" style="color:var(--mute);font-size:12px">Load an alignment from a DXF polyline</span>
+      <p><b>Design profile</b>: chainage and finished centreline level, straight grades between points, or set a curve length at a point for a parabolic vertical curve.</p>
+      <div id="t-vp"></div><button class="btn noprint" data-add="vp">Add point</button>
+      <p><b>Road template</b></p>
+      <p>
+        <label>Half width (m) <input data-tpl="w" type="number" step="any" style="width:80px;padding:5px"></label>
+        <label>Crossfall % <input data-tpl="cross" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label>Cut batter H:1 <input data-tpl="cutH" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label>Fill batter H:1 <input data-tpl="fillH" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label>Station every (m) <input data-tpl="interval" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label>Start chainage <input data-tpl="startCh" type="number" step="any" style="width:80px;padding:5px"></label>
+        <label>Superelevation % on curves <input data-tpl="superE" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label>Runoff length (m) <input data-tpl="runoff" type="number" step="any" style="width:70px;padding:5px"></label>
+        <label><input data-tpl="kerb" type="checkbox"> Kerb both sides</label>
+      </p>
+      <p><b>Pavement layers</b> (thickness in mm, over the full carriageway width)</p>
+      <div id="t-layers"></div><button class="btn noprint" data-add="layers">Add layer</button>
+      <p><button class="btn noprint" id="b-road">Calculate road</button>
+      <label class="noprint"><input type="checkbox" id="useRoad"> Use these quantities in the quote</label></p>
+      <div class="sum" id="s-road"></div>
+      <canvas id="prof" width="640" height="260" style="width:100%;max-width:640px;border:1px solid var(--line);margin-top:8px"></canvas>
+      <div id="road-table"></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-pipes">
+    <div class="card">
+      <p>One row per pipe run. Length in m, diameter in mm, trench width, depth and bedding depth in m.</p>
+      <div id="t-pipes"></div>
+      <button class="btn noprint" data-add="pipes">Add pipe run</button> <button class="btn noprint" data-cam="pipes" data-kind="line">Measure run with camera</button>
+      <div class="sum" id="s-pipes"></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-net">
+    <div class="card">
+      <p>Pipe network: one row per run, with ground and invert levels at the upstream (US) and downstream (DS) pit. Trench width is pipe diameter plus 0.6 m (minimum 0.75 m); pipe wall allowance 0.1 m; checks for grade under 0.5% and cover under 0.6 m.</p>
+      <div id="t-net"></div>
+      <button class="btn noprint" data-add="net">Add pipe run</button>
+      <div class="sum" id="s-net"></div>
+      <div id="net-out"></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-pave">
+    <div class="card">
+      <p>Pavement layers: length and width in m, thickness in mm. Use the same layer name to group layers.</p>
+      <div id="t-pave"></div>
+      <button class="btn noprint" data-add="pave">Add layer</button> <button class="btn noprint" data-cam="pave" data-kind="area">Measure area with camera</button>
+      <div class="sum" id="s-pave"></div>
+    </div>
+    <div class="card">
+      <p>Kerbs (length in m)</p>
+      <div id="t-kerbs"></div>
+      <button class="btn noprint" data-add="kerbs">Add kerb</button> <button class="btn noprint" data-cam="kerbs" data-kind="line">Measure kerb with camera</button>
+    </div>
+  </section>
+  <section class="tab" id="tab-struct">
+    <div class="card"><p><b>Retaining walls</b></p><div id="t-walls"></div><button class="btn noprint" data-add="walls">Add wall</button></div>
+    <div class="card"><p><b>Culverts</b> (pipe or box, length each and number)</p><div id="t-culverts"></div><button class="btn noprint" data-add="culverts">Add culvert</button></div>
+    <div class="card"><p><b>Bridges</b></p><div id="t-bridges"></div><button class="btn noprint" data-add="bridges">Add bridge</button></div>
+    <div class="card"><p><b>Piling</b></p><div id="t-piles"></div><button class="btn noprint" data-add="piles">Add pile group</button></div>
+  </section>
+  <section class="tab" id="tab-quote">
+    <div class="card">
+      <table id="quote-table"></table>
+      <div class="sum" id="s-quote"></div>
+      <label class="noprint">Margin % <input id="margin" type="number" step="0.1" style="width:80px"></label>
+      <label class="noprint">GST % <input id="gst" type="number" step="0.1" style="width:80px"></label>
+      <div class="noprint">
+        <button class="btn" id="b-xls">Export Excel</button>
+        <button class="btn" id="b-pdf">Export PDF</button>
+        <button class="btn" id="b-json">Send to ShopMate Quotes</button>
+        <button class="btn" id="b-job">Export job for DesignAI / BuildersAI</button>
+        <button class="btn" id="b-save">Save job file</button>
+        <label style="background:var(--acc);color:#fff;padding:7px 12px;border-radius:4px;cursor:pointer;margin:4px 6px 0 0;display:inline-block">Open job file <input type="file" id="jobFile" accept=".tjob,.json" hidden></label>
+      </div>
+    </div>
+  </section>
+  <section class="tab" id="tab-test">
+    <div class="card">
+      <button class="btn" id="b-test">Run self-test</button>
+      <div id="test-out"></div>
+    </div>
+  </section>
+</main>
+
+<script src="../live-cam.js"></script><script src="../ar-lite.js"></script>
+<script id="calc">
+const C = {
+  sections(rows) {
+    const r = rows.slice().sort((a, b) => a.ch - b.ch);
+    let cut = 0, fill = 0;
+    for (let i = 0; i < r.length - 1; i++) {
+      const L = r[i + 1].ch - r[i].ch;
+      cut += (r[i].cut + r[i + 1].cut) / 2 * L;
+      fill += (r[i].fill + r[i + 1].fill) / 2 * L;
+    }
+    return { cut, fill, net: cut - fill };
+  },
+  pipe(p) {
+    const exc = p.len * p.w * p.d;
+    const bed = p.len * p.w * p.b;
+    const disp = Math.PI * Math.pow(p.dia / 2000, 2) * p.len;
+    return { exc, bed, disp, back: exc - bed - disp };
+  },
+  pave(p) {
+    const area = p.len * p.w;
+    return { area, vol: area * p.t / 1000 };
+  },
+  totals(S) {
+    const earth = C.sections(S.sections);
+    const pipes = { exc: 0, bed: 0, back: 0, byDia: {} };
+    S.pipes.forEach(p => {
+      const c = C.pipe(p);
+      pipes.exc += c.exc; pipes.bed += c.bed; pipes.back += c.back;
+      pipes.byDia[p.dia] = (pipes.byDia[p.dia] || 0) + p.len;
+    });
+    const pave = { area: 0, byName: {} };
+    S.pave.forEach(p => {
+      const c = C.pave(p);
+      pave.area += c.area;
+      const n = p.name || 'Layer';
+      pave.byName[n] = (pave.byName[n] || 0) + c.vol;
+    });
+    const kerb = S.kerbs.reduce((a, k) => a + k.len, 0);
+    return { earth, pipes, pave, kerb };
+  },
+  lines(S) {
+    const t = C.totals(S);
+    const L = [];
+    L.push({ key: 'earth_cut', label: 'Bulk excavation (cut)', unit: 'm3', qty: t.earth.cut });
+    L.push({ key: 'earth_fill', label: 'Bulk fill', unit: 'm3', qty: t.earth.fill });
+    if (S.surf && S.surf.use) {
+      L.push({ key: 'surf_cut', label: 'Bulk cut (surface model)', unit: 'm3', qty: S.surf.cut });
+      L.push({ key: 'surf_fill', label: 'Bulk fill (surface model)', unit: 'm3', qty: S.surf.fill });
+    }
+    L.push({ key: 'trench_exc', label: 'Trench excavation', unit: 'm3', qty: t.pipes.exc });
+    L.push({ key: 'bedding', label: 'Pipe bedding', unit: 'm3', qty: t.pipes.bed });
+    L.push({ key: 'backfill', label: 'Trench backfill', unit: 'm3', qty: t.pipes.back });
+    Object.keys(t.pipes.byDia).forEach(d =>
+      L.push({ key: 'pipe_' + d, label: 'Supply and lay pipe DN' + d, unit: 'm', qty: t.pipes.byDia[d] }));
+    Object.keys(t.pave.byName).forEach(n =>
+      L.push({ key: 'pave_' + n, label: 'Pavement: ' + n, unit: 'm3', qty: t.pave.byName[n] }));
+    L.push({ key: 'kerb', label: 'Kerb and channel', unit: 'm', qty: t.kerb });
+    return L.concat(C.extraLines(S)).filter(l => l.qty > 0);
+  },
+  quote(lines, rates, margin, gst) {
+    const sub = lines.reduce((a, l) => a + l.qty * (rates[l.key] || 0), 0);
+    const withMargin = sub * (1 + margin / 100);
+    const gstAmt = withMargin * gst / 100;
+    return { sub, margin: withMargin - sub, gst: gstAmt, total: withMargin + gstAmt };
+  },
+  parsePoints(text) {
+    const out = [];
+    String(text || '').split(/\r?\n/).forEach(l => {
+      const t = l.trim().split(/[\s,;]+/).filter(Boolean);
+      const n = t.map(Number);
+      if (t.length >= 4 && n.slice(1, 4).every(Number.isFinite)) out.push({ x: n[1], y: n[2], z: n[3] });
+      else if (t.length >= 3 && n.slice(0, 3).every(Number.isFinite)) out.push({ x: n[0], y: n[1], z: n[2] });
+    });
+    return out;
+  },
+  parseDxf(text) {
+    const L = String(text || '').split(/\r?\n/), out = [];
+    let ent = null, cur = null;
+    const flush = () => {
+      if (!cur) return;
+      const v = (a, b, c) => { if (cur[a] !== undefined && cur[b] !== undefined && cur[c] !== undefined) out.push({ x: +cur[a], y: +cur[b], z: +cur[c] }); };
+      if (ent === 'POINT' || ent === 'VERTEX') v(10, 20, 30);
+      else if (ent === '3DFACE') { v(10, 20, 30); v(11, 21, 31); v(12, 22, 32); v(13, 23, 33); }
+      cur = null; ent = null;
+    };
+    for (let i = 0; i + 1 < L.length; i += 2) {
+      const code = parseInt(L[i].trim(), 10), val = L[i + 1].trim();
+      if (code === 0) { flush(); if (val === 'POINT' || val === 'VERTEX' || val === '3DFACE') { ent = val; cur = {}; } }
+      else if (cur) cur[code] = val;
+    }
+    flush();
+    return out.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z));
+  },
+  bbox(pts) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pts.forEach(p => { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; });
+    return { x0, y0, x1, y1 };
+  },
+  tin(points) {
+    const seen = new Set(), P = [];
+    points.forEach(p => { const k = p.x.toFixed(4) + '|' + p.y.toFixed(4); if (!seen.has(k)) { seen.add(k); P.push(p); } });
+    if (P.length < 3) return { pts: P, tris: [] };
+    const b = C.bbox(P), d = Math.max(b.x1 - b.x0, b.y1 - b.y0) || 1, mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
+    const q = P.map(p => ({ x: (p.x - mx) / d, y: (p.y - my) / d }));
+    const n = q.length;
+    q.push({ x: -20, y: -20 }, { x: 0, y: 20 }, { x: 20, y: -20 });
+    const inCirc = (t, p) => {
+      const a = q[t[0]], bb = q[t[1]], c = q[t[2]];
+      const ax = a.x - p.x, ay = a.y - p.y, bx = bb.x - p.x, by = bb.y - p.y, cx = c.x - p.x, cy = c.y - p.y;
+      const det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay);
+      const o = (bb.x - a.x) * (c.y - a.y) - (bb.y - a.y) * (c.x - a.x);
+      return o > 0 ? det > 1e-12 : det < -1e-12;
+    };
+    let tris = [[n, n + 1, n + 2]];
+    for (let i = 0; i < n; i++) {
+      const bad = [], keep = [], edges = new Map();
+      tris.forEach(t => (inCirc(t, q[i]) ? bad : keep).push(t));
+      bad.forEach(t => [[t[0], t[1]], [t[1], t[2]], [t[2], t[0]]].forEach(e => {
+        const k = e[0] < e[1] ? e[0] + '_' + e[1] : e[1] + '_' + e[0];
+        edges.set(k, edges.has(k) ? null : e);
+      }));
+      tris = keep;
+      edges.forEach(e => { if (e) tris.push([e[0], e[1], i]); });
+    }
+    return { pts: P, tris: tris.filter(t => t[0] < n && t[1] < n && t[2] < n) };
+  },
+  raster(tin, g) {
+    const z = new Float64Array(g.nx * g.ny).fill(NaN), P = tin.pts;
+    tin.tris.forEach(t => {
+      const a = P[t[0]], b = P[t[1]], c = P[t[2]];
+      const den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+      if (Math.abs(den) < 1e-12) return;
+      const i0 = Math.max(0, Math.floor((Math.min(a.x, b.x, c.x) - g.x0) / g.cs)), i1 = Math.min(g.nx - 1, Math.ceil((Math.max(a.x, b.x, c.x) - g.x0) / g.cs));
+      const j0 = Math.max(0, Math.floor((Math.min(a.y, b.y, c.y) - g.y0) / g.cs)), j1 = Math.min(g.ny - 1, Math.ceil((Math.max(a.y, b.y, c.y) - g.y0) / g.cs));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const px = g.x0 + (i + 0.5) * g.cs, py = g.y0 + (j + 0.5) * g.cs;
+        const l1 = ((b.y - c.y) * (px - c.x) + (c.x - b.x) * (py - c.y)) / den;
+        const l2 = ((c.y - a.y) * (px - c.x) + (a.x - c.x) * (py - c.y)) / den;
+        const l3 = 1 - l1 - l2, e = -1e-9;
+        if (l1 >= e && l2 >= e && l3 >= e) z[j * g.nx + i] = l1 * a.z + l2 * b.z + l3 * c.z;
+      }
+    });
+    return z;
+  },
+  cutFill(egPts, design, cs) {
+    const tin = C.tin(egPts);
+    if (!tin.tris.length) return null;
+    const b = C.bbox(tin.pts), w = b.x1 - b.x0, h = b.y1 - b.y0;
+    let step = cs > 0 ? cs : 1;
+    while ((w / step) * (h / step) > 2e6) step *= 2;
+    const g = { x0: b.x0, y0: b.y0, cs: step, nx: Math.max(1, Math.ceil(w / step)), ny: Math.max(1, Math.ceil(h / step)) };
+    const ze = C.raster(tin, g), zd = design.tin ? C.raster(design.tin, g) : null;
+    const dz = new Float64Array(ze.length).fill(NaN), cell = step * step;
+    let cut = 0, fill = 0, area = 0;
+    for (let k = 0; k < ze.length; k++) {
+      const d = zd ? zd[k] : design.level;
+      if (!Number.isFinite(ze[k]) || !Number.isFinite(d)) continue;
+      const v = ze[k] - d; dz[k] = v; area += cell;
+      if (v > 0) cut += v * cell; else fill -= v * cell;
+    }
+    return { cut, fill, net: cut - fill, area, g, dz, tin };
+  },
+  zAt(tin, x, y) {
+    if (!tin._bb) tin._bb = tin.tris.map(t => { const a = tin.pts[t[0]], b = tin.pts[t[1]], c = tin.pts[t[2]]; return [Math.min(a.x, b.x, c.x), Math.max(a.x, b.x, c.x), Math.min(a.y, b.y, c.y), Math.max(a.y, b.y, c.y)]; });
+    for (let k = 0; k < tin.tris.length; k++) {
+      const bb = tin._bb[k];
+      if (x < bb[0] || x > bb[1] || y < bb[2] || y > bb[3]) continue;
+      const t = tin.tris[k], a = tin.pts[t[0]], b = tin.pts[t[1]], c = tin.pts[t[2]];
+      const den = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+      if (Math.abs(den) < 1e-12) continue;
+      const l1 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / den, l2 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / den, l3 = 1 - l1 - l2, e = -1e-9;
+      if (l1 >= e && l2 >= e && l3 >= e) return l1 * a.z + l2 * b.z + l3 * c.z;
+    }
+    return NaN;
+  },
+  alignment(pts) {
+    const segs = []; let ch = 0;
+    const unit = (a, b) => { const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy); return l < 1e-9 ? null : { x: dx / l, y: dy / l, l }; };
+    const line = (a, b) => { const u = unit(a, b); if (!u) return; segs.push({ type: 'line', x: a.x, y: a.y, dx: u.x, dy: u.y, len: u.l, ch0: ch }); ch += u.l; };
+    const n = pts.length;
+    if (n < 2) return { segs, length: 0 };
+    let cur = pts[0];
+    for (let i = 1; i < n - 1; i++) {
+      const R = pts[i].r || 0, u1 = unit(pts[i - 1], pts[i]), u2 = unit(pts[i], pts[i + 1]);
+      let done = false;
+      if (R > 0 && u1 && u2) {
+        const delta = Math.acos(Math.max(-1, Math.min(1, u1.x * u2.x + u1.y * u2.y)));
+        if (delta > 1e-6 && delta < Math.PI - 1e-6) {
+          let LS = pts[i].ls || 0, ths = LS > 0 ? LS / (2 * R) : 0;
+          if (delta <= 2 * ths + 1e-6) { LS = 0; ths = 0; }
+          const sp = LS > 0; let T = R * Math.tan(delta / 2);
+          if (sp) { const f = C.clo(LS, R, LS); T = (R + f.y - R * (1 - Math.cos(ths))) * Math.tan(delta / 2) + f.x - R * Math.sin(ths); }
+          const avail1 = Math.hypot(pts[i].x - cur.x, pts[i].y - cur.y), avail2 = u2.l * ((pts[i + 1].r || 0) > 0 && i + 1 < n - 1 ? 0.5 : 1);
+          if (T <= avail1 + 1e-9 && T <= avail2 + 1e-9) {
+            const dir = (u1.x * u2.y - u1.y * u2.x) > 0 ? 1 : -1, h0 = Math.atan2(u1.y, u1.x), h1 = Math.atan2(u2.y, u2.x);
+            const ts = { x: pts[i].x - u1.x * T, y: pts[i].y - u1.y * T }; let sc = ts, hs = h0;
+            line(cur, ts);
+            if (sp) {
+              segs.push({ type: 'spiral', x: ts.x, y: ts.y, h: h0, r: R, ls: LS, dir, back: false, len: LS, ch0: ch }); ch += LS;
+              const f = C.clo(LS, R, LS);
+              sc = { x: ts.x + f.x * Math.cos(h0) - dir * f.y * Math.sin(h0), y: ts.y + f.x * Math.sin(h0) + dir * f.y * Math.cos(h0) }; hs = h0 + dir * ths;
+            }
+            const ux = Math.cos(hs), uy = Math.sin(hs), nx = dir > 0 ? -uy : uy, ny = dir > 0 ? ux : -ux, cx = sc.x + nx * R, cy = sc.y + ny * R, arcLen = R * (delta - 2 * ths);
+            segs.push({ type: 'arc', cx, cy, r: R, a0: Math.atan2(sc.y - cy, sc.x - cx), dir, len: arcLen, ch0: ch, sp }); ch += arcLen;
+            const st = { x: pts[i].x + u2.x * T, y: pts[i].y + u2.y * T };
+            if (sp) { segs.push({ type: 'spiral', x: st.x, y: st.y, h: h1 + Math.PI, r: R, ls: LS, dir: -dir, back: true, len: LS, ch0: ch }); ch += LS; }
+            cur = st; done = true;
+          }
+        }
+      }
+      if (!done) { line(cur, pts[i]); cur = pts[i]; }
+    }
+    line(cur, pts[n - 1]);
+    return { segs, length: ch };
+  },
+  clo(t, R, ls) { const f = t * t / (2 * R * ls); return { x: t * (1 - f * f / 10 + Math.pow(f, 4) / 216), y: t * (f / 3 - Math.pow(f, 3) / 42 + Math.pow(f, 5) / 1320), phi: f }; },
+  pointAt(al, d) {
+    const s = al.segs.find(g => d <= g.ch0 + g.len + 1e-9) || al.segs[al.segs.length - 1], t = Math.min(Math.max(d - s.ch0, 0), s.len);
+    if (s.type === 'spiral') {
+      const f = C.clo(s.back ? s.len - t : t, s.r, s.ls), c = Math.cos(s.h), n = Math.sin(s.h), hd = s.back ? s.h - Math.PI + s.dir * f.phi : s.h + s.dir * f.phi;
+      return { x: s.x + f.x * c - s.dir * f.y * n, y: s.y + f.x * n + s.dir * f.y * c, dx: Math.cos(hd), dy: Math.sin(hd) };
+    }
+    if (s.type === 'arc') {
+      const a = s.a0 + s.dir * t / s.r;
+      return { x: s.cx + s.r * Math.cos(a), y: s.cy + s.r * Math.sin(a), dx: -s.dir * Math.sin(a), dy: s.dir * Math.cos(a) };
+    }
+    return { x: s.x + s.dx * t, y: s.y + s.dy * t, dx: s.dx, dy: s.dy };
+  },
+  superAt(al, d, ro) {
+    let best = { t: 0, dir: 1 };
+    al.segs.forEach(s => {
+      if (s.type === 'spiral') { if (d >= s.ch0 && d <= s.ch0 + s.len) { const u = (d - s.ch0) / s.len, t = s.back ? 1 - u : u; if (t > best.t) best = { t, dir: s.back ? -s.dir : s.dir }; } return; }
+      if (s.type !== 'arc') return;
+      let t = 0; const ro0 = s.sp ? 0 : ro;
+      if (d >= s.ch0 && d <= s.ch0 + s.len) t = 1;
+      else if (ro0 > 0 && d < s.ch0 && d >= s.ch0 - ro0) t = (d - (s.ch0 - ro0)) / ro0;
+      else if (ro0 > 0 && d > s.ch0 + s.len && d <= s.ch0 + s.len + ro0) t = 1 - (d - (s.ch0 + s.len)) / ro0;
+      if (t > best.t) best = { t, dir: s.dir };
+    });
+    return best;
+  },
+  levelAt(vp, ch) {
+    const v = vp.slice().sort((a, b) => a.ch - b.ch);
+    if (!v.length) return NaN;
+    if (ch <= v[0].ch) return v[0].z;
+    if (ch >= v[v.length - 1].ch) return v[v.length - 1].z;
+    for (let i = 1; i + 1 < v.length; i++) {
+      const L0 = Math.min(v[i].vc || 0, 2 * (v[i].ch - v[i - 1].ch), 2 * (v[i + 1].ch - v[i].ch));
+      if (L0 > 0 && ch > v[i].ch - L0 / 2 && ch < v[i].ch + L0 / 2) {
+        const g1 = (v[i].z - v[i - 1].z) / (v[i].ch - v[i - 1].ch), g2 = (v[i + 1].z - v[i].z) / (v[i + 1].ch - v[i].ch), x = ch - (v[i].ch - L0 / 2);
+        return v[i].z - g1 * L0 / 2 + g1 * x + (g2 - g1) / (2 * L0) * x * x;
+      }
+    }
+    for (let i = 0; i + 1 < v.length; i++) if (ch <= v[i + 1].ch) { const f = (ch - v[i].ch) / ((v[i + 1].ch - v[i].ch) || 1); return v[i].z + f * (v[i + 1].z - v[i].z); }
+    return v[v.length - 1].z;
+  },
+  contours(tin, iv) {
+    const out = [];
+    if (!(iv > 0)) return out;
+    tin.tris.forEach(t => {
+      const p = [tin.pts[t[0]], tin.pts[t[1]], tin.pts[t[2]]];
+      const zmin = Math.min(p[0].z, p[1].z, p[2].z), zmax = Math.max(p[0].z, p[1].z, p[2].z);
+      for (let lv = Math.ceil(zmin / iv) * iv; lv <= zmax + 1e-9; lv += iv) {
+        const q = [];
+        for (let e = 0; e < 3; e++) {
+          const a = p[e], b = p[(e + 1) % 3];
+          if ((a.z - lv) * (b.z - lv) < 0) { const f = (lv - a.z) / (b.z - a.z); q.push({ x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }); }
+        }
+        if (q.length === 2) out.push({ z: lv, x1: q[0].x, y1: q[0].y, x2: q[1].x, y2: q[1].y });
+      }
+    });
+    return out;
+  },
+  parseDxfPolyline(text) {
+    const L = String(text || '').split(/\r?\n/), out = []; let ent = null, x = null;
+    for (let i = 0; i + 1 < L.length; i += 2) {
+      const code = parseInt(L[i].trim(), 10), val = L[i + 1].trim();
+      if (code === 0) { if (out.length && (ent === 'LWPOLYLINE' || val === 'SEQEND' || val === 'ENDSEC')) break; ent = val; x = null; continue; }
+      if (ent === 'LWPOLYLINE' || ent === 'VERTEX') {
+        if (code === 10) x = parseFloat(val);
+        else if (code === 20 && x !== null) { out.push({ x, y: parseFloat(val), r: 0 }); x = null; }
+      }
+    }
+    return out.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+  },
+  corridor(tin, al, vp, tp, layers) {
+    const w = tp.w, cr = (tp.cross || 0) / 100, st = tp.step > 0 ? tp.step : 0.5, maxN = Math.ceil((tp.maxOff || 30) / st), iv = tp.interval > 0 ? tp.interval : 10;
+    const ds = []; for (let d = 0; d < al.length - 1e-9; d += iv) ds.push(d); ds.push(al.length);
+    const rows = [], skipped = [];
+    ds.forEach(d => {
+      const p = C.pointAt(al, d), ch = (tp.startCh || 0) + d, L = C.levelAt(vp, ch), eg = C.zAt(tin, p.x, p.y);
+      if (!Number.isFinite(eg) || !Number.isFinite(L)) { skipped.push(ch); return; }
+      let cut = 0, fill = 0;
+      const sup = C.superAt(al, d, tp.runoff == null ? 30 : tp.runoff), se = (tp.superE || 0) / 100;
+      [1, -1].forEach(sd => {
+        const kk = (1 - sup.t) * cr + sup.t * sup.dir * sd * se;
+        const nx = -p.dy * sd, ny = p.dx * sd, G = o => C.zAt(tin, p.x + nx * o, p.y + ny * o);
+        const nC = Math.max(1, Math.round(w / st)), sc = w / nC;
+        for (let k = 0; k < nC; k++) {
+          const o = (k + 0.5) * sc, g = G(o);
+          if (!Number.isFinite(g)) continue;
+          const dz = g - (L - kk * o);
+          if (dz > 0) cut += dz * sc; else fill -= dz * sc;
+        }
+        const Fe = L - kk * w, ge = G(w);
+        if (!Number.isFinite(ge)) return;
+        const isCut = ge >= Fe;
+        for (let k = 0; k < maxN; k++) {
+          const o = w + (k + 0.5) * st, g = G(o);
+          if (!Number.isFinite(g)) break;
+          const dz = isCut ? g - (Fe + (o - w) / tp.cutH) : (Fe - (o - w) / tp.fillH) - g;
+          if (dz <= 0) break;
+          if (isCut) cut += dz * st; else fill += dz * st;
+        }
+      });
+      rows.push({ ch, d, eg, dg: L, cut, fill });
+    });
+    const v = C.sections(rows.map(r => ({ ch: r.ch, cut: r.cut, fill: r.fill }))), area = al.length * 2 * w;
+    return { rows, skipped, cut: v.cut, fill: v.fill, net: v.net, length: al.length, area, kerb: tp.kerb ? al.length * 2 : 0,
+      layers: (layers || []).filter(l => l.t > 0).map(l => ({ name: l.name || 'Layer', vol: area * l.t / 1000 })) };
+  },
+  network(rows) {
+    const o = { exc: 0, bed: 0, back: 0, byDia: {}, pits: [0, 0, 0], runs: [] };
+    const pit = d => { if (d >= 0) o.pits[d <= 1.5 ? 0 : d <= 3 ? 1 : 2]++; };
+    let first = true;
+    rows.forEach(r => {
+      if (!(r.len > 0)) return;
+      const od = r.dia / 1000 + 0.1, dUS = r.gUS - r.iUS + od + r.bed, dDS = r.gDS - r.iDS + od + r.bed, avg = (dUS + dDS) / 2;
+      const width = Math.max(0.75, r.dia / 1000 + 0.6), exc = r.len * width * avg, bed = r.len * width * r.bed, disp = Math.PI * Math.pow(r.dia / 2000, 2) * r.len;
+      const grade = (r.iUS - r.iDS) / r.len * 100, cover = Math.min(r.gUS - r.iUS, r.gDS - r.iDS) - r.dia / 1000, flags = [];
+      if (grade < 0.5) flags.push(grade <= 0 ? 'Falls the wrong way' : 'Grade under 0.5%');
+      if (cover < 0.6) flags.push('Cover under 0.6 m');
+      o.exc += exc; o.bed += bed; o.back += exc - bed - disp; o.byDia[r.dia] = (o.byDia[r.dia] || 0) + r.len;
+      if (first) { pit(r.gUS - r.iUS); first = false; }
+      pit(r.gDS - r.iDS);
+      o.runs.push({ name: r.name, grade, avg, exc, cover, flags });
+    });
+    return o;
+  },
+  structures(S) {
+    const L = [];
+    let v = 0, a = 0; (S.walls || []).forEach(w => { v += w.len * w.h * w.t; a += w.len * w.h; });
+    L.push({ key: 'wall_conc', label: 'Retaining wall concrete', unit: 'm3', qty: v }, { key: 'wall_face', label: 'Retaining wall face area (formwork)', unit: 'm2', qty: a });
+    let cl = 0, hw = 0; (S.culverts || []).forEach(c => { cl += c.len * c.n; hw += 2 * c.n; });
+    L.push({ key: 'culvert_len', label: 'Culvert pipe or box (supply and lay)', unit: 'm', qty: cl }, { key: 'culvert_hw', label: 'Culvert headwalls', unit: 'ea', qty: hw });
+    let da = 0, pr = 0; (S.bridges || []).forEach(b => { da += b.span * b.w; pr += b.piers; });
+    L.push({ key: 'bridge_deck', label: 'Bridge deck', unit: 'm2', qty: da }, { key: 'bridge_piers', label: 'Bridge piers and abutments', unit: 'ea', qty: pr });
+    let pn = 0, pl = 0; (S.piles || []).forEach(p => { pn += p.n; pl += p.n * p.len; });
+    L.push({ key: 'pile_ea', label: 'Piles (set up and drive or bore)', unit: 'ea', qty: pn }, { key: 'pile_len', label: 'Piling length', unit: 'm', qty: pl });
+    return L;
+  },
+  extraLines(S) {
+    const L = [], R = S.road;
+    if (R && R.use) {
+      L.push({ key: 'road_cut', label: 'Road bulk cut (corridor)', unit: 'm3', qty: R.cut }, { key: 'road_fill', label: 'Road bulk fill (corridor)', unit: 'm3', qty: R.fill },
+        { key: 'road_trim', label: 'Subgrade trim and compaction', unit: 'm2', qty: R.area });
+      (R.layers || []).forEach(l => L.push({ key: 'road_' + l.name, label: 'Road pavement: ' + l.name, unit: 'm3', qty: l.vol }));
+      L.push({ key: 'road_kerb', label: 'Road kerb and channel', unit: 'm', qty: R.kerb });
+    }
+    const N = C.network(S.net || []);
+    Object.keys(N.byDia).forEach(d => L.push({ key: 'net_pipe_' + d, label: 'Network pipe DN' + d, unit: 'm', qty: N.byDia[d] }));
+    L.push({ key: 'net_exc', label: 'Network trench excavation', unit: 'm3', qty: N.exc }, { key: 'net_bed', label: 'Network pipe bedding', unit: 'm3', qty: N.bed }, { key: 'net_back', label: 'Network trench backfill', unit: 'm3', qty: N.back },
+      { key: 'net_pit1', label: 'Pits to 1.5 m deep', unit: 'ea', qty: N.pits[0] }, { key: 'net_pit2', label: 'Pits 1.5 to 3 m deep', unit: 'ea', qty: N.pits[1] }, { key: 'net_pit3', label: 'Pits over 3 m deep', unit: 'ea', qty: N.pits[2] });
+    return L.concat(C.structures(S));
+  },
+  selfTest() {
+    const near = (a, b) => Math.abs(a - b) < 1e-3;
+    const r = [];
+    const e = C.sections([{ ch: 0, cut: 10, fill: 0 }, { ch: 20, cut: 20, fill: 4 }]);
+    r.push({ name: 'Earthworks average end area', ok: near(e.cut, 300) && near(e.fill, 40) });
+    const p = C.pipe({ len: 10, dia: 300, w: 1, d: 2, b: 0.1 });
+    r.push({ name: 'Pipe trench volumes', ok: near(p.exc, 20) && near(p.bed, 1) && near(p.back, 18.2931) });
+    const v = C.pave({ len: 100, w: 7, t: 300 });
+    r.push({ name: 'Pavement volume', ok: near(v.area, 700) && near(v.vol, 210) });
+    const q = C.quote([{ key: 'a', qty: 10 }], { a: 100 }, 10, 10);
+    r.push({ name: 'Quote margin and GST', ok: near(q.sub, 1000) && near(q.total, 1210) });
+    const t = C.totals({ sections: [], pipes: [{ len: 5, dia: 300, w: 1, d: 1, b: 0.1 }, { len: 5, dia: 300, w: 1, d: 1, b: 0.1 }], pave: [], kerbs: [{ len: 3 }] });
+    r.push({ name: 'Pipe length grouped by diameter', ok: t.pipes.byDia[300] === 10 && t.kerb === 3 });
+    const sq = [{ x: 0, y: 0, z: 10 }, { x: 10, y: 0, z: 10 }, { x: 10, y: 10, z: 10 }, { x: 0, y: 10, z: 10 }];
+    const f1 = C.cutFill(sq, { level: 9 }, 1);
+    r.push({ name: 'Surface cut over a flat design level', ok: !!f1 && near(f1.cut, 100) && near(f1.fill, 0) });
+    const sl = [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 10 }, { x: 10, y: 10, z: 10 }, { x: 0, y: 10, z: 0 }];
+    const f2 = C.cutFill(sl, { level: 5 }, 1);
+    r.push({ name: 'Sloped ground: cut equals fill', ok: !!f2 && near(f2.cut, 125) && near(f2.fill, 125) });
+    const f3 = C.cutFill(sq, { tin: C.tin(sq.map(p => ({ x: p.x, y: p.y, z: 12 }))) }, 1);
+    r.push({ name: 'Design surface above ground gives fill', ok: !!f3 && near(f3.fill, 200) && near(f3.cut, 0) });
+    r.push({ name: 'DXF points and 3D faces read', ok: C.parseDxf('0\nPOINT\n10\n1\n20\n2\n30\n3\n0\n3DFACE\n10\n0\n20\n0\n30\n1\n11\n1\n21\n0\n31\n1\n12\n1\n22\n1\n32\n2\n13\n1\n23\n1\n33\n2\n0\nEOF').length === 5 });
+    r.push({ name: 'Point text with and without IDs', ok: C.parsePoints('P1,1,2,3\n4 5 6').length === 2 });
+    const flat = []; for (let x = -50; x <= 150; x += 25) for (let y = -50; y <= 50; y += 25) flat.push({ x, y, z: 10 });
+    const rd = C.corridor(C.tin(flat), C.alignment([{ x: 0, y: 0 }, { x: 100, y: 0 }]), [{ ch: 0, z: 9 }, { ch: 100, z: 9 }], { w: 3.5, cross: 0, cutH: 1, fillH: 1, interval: 10, startCh: 0, step: 0.5, maxOff: 30, kerb: true }, [{ name: 'Base', t: 300 }]);
+    r.push({ name: 'Road corridor cut (carriageway and batters)', ok: near(rd.cut, 800) && near(rd.fill, 0) && near(rd.area, 700) && near(rd.layers[0].vol, 210) && near(rd.kerb, 200) });
+    r.push({ name: 'Design profile level by chainage', ok: near(C.levelAt([{ ch: 0, z: 0 }, { ch: 100, z: 10 }], 50), 5) });
+    const nw = C.network([{ name: 'A', dia: 300, len: 50, gUS: 10, gDS: 9.5, iUS: 8.8, iDS: 8.55, bed: 0.15 }]);
+    r.push({ name: 'Pipe network trench, grade and pits', ok: near(nw.exc, 73.125) && near(nw.runs[0].grade, 0.5) && nw.pits[0] === 2 && nw.runs[0].flags.length === 0 });
+    r.push({ name: 'Structures: wall concrete', ok: near(C.structures({ walls: [{ len: 10, h: 2, t: 0.3 }] })[0].qty, 6) });
+    const ac = C.alignment([{ x: 0, y: 0 }, { x: 100, y: 0, r: 20 }, { x: 100, y: 100 }]), mid = C.pointAt(ac, 80 + Math.PI * 5);
+    r.push({ name: 'Horizontal curve length and position', ok: near(ac.length, 160 + Math.PI * 10) && near(mid.x, 80 + 20 * Math.SQRT1_2) && near(mid.y, 20 - 20 * Math.SQRT1_2) });
+    r.push({ name: 'Vertical curve level at the VPI', ok: near(C.levelAt([{ ch: 0, z: 0 }, { ch: 100, z: 0, vc: 40 }, { ch: 200, z: 10 }], 100), 0.5) });
+    { const as = C.alignment([{ x: 0, y: 0 }, { x: 100, y: 0, r: 50, ls: 30 }, { x: 100, y: 100 }]); let jump = 0, pv = C.pointAt(as, 0);
+      for (let d = 0.5; d <= as.length; d += 0.5) { const q = C.pointAt(as, d); jump = Math.max(jump, Math.hypot(q.x - pv.x, q.y - pv.y) - 0.5); pv = q; }
+      const sp = as.segs.filter(g => g.type === 'spiral').length, en = C.pointAt(as, as.length), tg = C.pointAt(as, as.length - 30);
+      r.push({ name: 'Spiral transitions (continuous, tangent in and out)', ok: sp === 2 && jump < 0.02 && Math.abs(en.x - 100) < 0.05 && Math.abs(en.y - 100) < 0.05 && tg.dy > 0.999 }); }
+    r.push({ name: 'Superelevation ramp', ok: near(C.superAt(ac, 65, 30).t, 0.5) && C.superAt(ac, 90, 30).t === 1 && C.superAt(ac, 90, 30).dir === 1 });
+    const cs = C.contours(C.tin([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 10 }, { x: 10, y: 10, z: 10 }, { x: 0, y: 10, z: 0 }]), 2);
+    r.push({ name: 'Contour lines on a slope', ok: near(cs.reduce((a, s) => a + Math.hypot(s.x2 - s.x1, s.y2 - s.y1), 0), 40) });
+    r.push({ name: 'DXF polyline alignment read', ok: C.parseDxfPolyline('0\nLWPOLYLINE\n90\n3\n10\n0\n20\n0\n10\n50\n20\n0\n10\n50\n20\n50\n0\nEOF').length === 3 });
+    return r;
+  }
+};
+</script>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = n => Number(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const DEF = {
+  sections: () => ({ ch: 0, cut: 0, fill: 0 }),
+  pipes: () => ({ name: '', len: 0, dia: 300, w: 1, d: 1.5, b: 0.15 }),
+  pave: () => ({ name: 'Base', len: 0, w: 0, t: 0 }),
+  kerbs: () => ({ name: 'Kerb', len: 0 }),
+  al: () => ({ x: 0, y: 0, r: 0, ls: 0 }), vp: () => ({ ch: 0, z: 0, vc: 0 }), layers: () => ({ name: 'Base', t: 300 }),
+  net: () => ({ name: '', dia: 300, len: 0, gUS: 0, gDS: 0, iUS: 0, iDS: 0, bed: 0.15 }),
+  walls: () => ({ name: '', len: 0, h: 0, t: 0.3 }), culverts: () => ({ name: '', len: 0, size: 600, n: 1 }),
+  bridges: () => ({ name: '', span: 0, w: 0, piers: 2 }), piles: () => ({ name: '', n: 0, len: 0, dia: 450 })
+};
+const COLS = {
+  sections: [['ch', 'Chainage (m)', 'n'], ['cut', 'Cut area (m2)', 'n'], ['fill', 'Fill area (m2)', 'n']],
+  pipes: [['name', 'Run', 't'], ['len', 'Length (m)', 'n'], ['dia', 'Dia (mm)', 'n'], ['w', 'Width (m)', 'n'], ['d', 'Depth (m)', 'n'], ['b', 'Bedding (m)', 'n']],
+  pave: [['name', 'Layer', 't'], ['len', 'Length (m)', 'n'], ['w', 'Width (m)', 'n'], ['t', 'Thickness (mm)', 'n']],
+  kerbs: [['name', 'Kerb', 't'], ['len', 'Length (m)', 'n']],
+  al: [['x', 'East (m)', 'n'], ['y', 'North (m)', 'n'], ['r', 'Curve radius (m, 0 = none)', 'n'], ['ls', 'Spiral length (m, 0 = none)', 'n']], vp: [['ch', 'Chainage (m)', 'n'], ['z', 'Design level (m)', 'n'], ['vc', 'Vertical curve length (m, 0 = none)', 'n']], layers: [['name', 'Layer', 't'], ['t', 'Thickness (mm)', 'n']],
+  net: [['name', 'Run', 't'], ['dia', 'Dia (mm)', 'n'], ['len', 'Length (m)', 'n'], ['gUS', 'Ground US', 'n'], ['gDS', 'Ground DS', 'n'], ['iUS', 'Invert US', 'n'], ['iDS', 'Invert DS', 'n'], ['bed', 'Bedding (m)', 'n']],
+  walls: [['name', 'Wall', 't'], ['len', 'Length (m)', 'n'], ['h', 'Height (m)', 'n'], ['t', 'Thickness (m)', 'n']],
+  culverts: [['name', 'Culvert', 't'], ['len', 'Length each (m)', 'n'], ['size', 'Size (mm)', 'n'], ['n', 'Number', 'n']],
+  bridges: [['name', 'Bridge', 't'], ['span', 'Span (m)', 'n'], ['w', 'Width (m)', 'n'], ['piers', 'Piers and abutments', 'n']],
+  piles: [['name', 'Pile group', 't'], ['n', 'Number', 'n'], ['len', 'Length each (m)', 'n'], ['dia', 'Dia (mm)', 'n']]
+};
+const HOST = { sections: 't-sections', pipes: 't-pipes', pave: 't-pave', kerbs: 't-kerbs', al: 't-al', vp: 't-vp', layers: 't-layers', net: 't-net', walls: 't-walls', culverts: 't-culverts', bridges: 't-bridges', piles: 't-piles' };
+
+let S = load() || {
+  project: '', sections: [DEF.sections(), Object.assign(DEF.sections(), { ch: 20 })],
+  pipes: [], pave: [], kerbs: [], rates: {}, margin: 15, gst: 10
+};
+const SD = { al: [{ x: 0, y: 0 }, { x: 100, y: 0 }], vp: [{ ch: 0, z: 0 }, { ch: 100, z: 0 }], layers: [{ name: 'Base', t: 300 }, { name: 'Sub-base', t: 200 }, { name: 'Wearing course', t: 40 }], net: [], walls: [], culverts: [], bridges: [], piles: [] };
+Object.keys(SD).forEach(k => { if (!Array.isArray(S[k])) S[k] = SD[k]; });
+S.tpl = Object.assign({ w: 3.5, cross: 3, cutH: 2, fillH: 3, interval: 10, startCh: 0, step: 0.5, maxOff: 30, kerb: true, superE: 0, runoff: 30 }, S.tpl || {});
+function load() { try { return JSON.parse(localStorage.getItem('shopmate-civil')); } catch (e) { return null; } }
+ArLite.init((r, c) => {
+  const nav = document.querySelector('#nav button[data-t="' + (c.k === 'pave' ? 'pave' : c.k === 'kerbs' ? 'pave' : 'pipes') + '"]'); if (nav) nav.click();
+  if (r.cancel) return alert(r.msg || 'Live camera measuring was cancelled');
+  const row = DEF[c.k](), m = Math.round((c.kind === 'line' ? +r.len : +r.area) * 100) / 100;
+  if (!(m > 0)) return;
+  if (c.kind === 'line') { row.len = m; row.name = (row.name || 'Camera') + ' (camera)'; } else { row.len = m; row.w = 1; row.t = 100; row.name = 'Base ' + m + ' m2 (camera)'; }
+  S[c.k].push(row); save(); renderTable(c.k); update();
+});
+function save() { try { localStorage.setItem('shopmate-civil', JSON.stringify(S)); } catch (e) {} }
+
+function renderTable(l) {
+  const cols = COLS[l];
+  let h = '<table><tr>' + cols.map(c => `<th class="${c[2] === 'n' ? 'num' : ''}">${c[1]}</th>`).join('') + '<th class="noprint"></th></tr>';
+  S[l].forEach((row, i) => {
+    h += '<tr>' + cols.map(c =>
+      `<td><input data-l="${l}" data-i="${i}" data-k="${c[0]}" type="${c[2] === 'n' ? 'number' : 'text'}" step="any" value="${row[c[0]] ?? ''}"></td>`).join('') +
+      `<td class="noprint"><button class="x" data-del="${l}" data-i="${i}" title="Remove">&times;</button></td></tr>`;
+  });
+  $('#' + HOST[l]).innerHTML = h + '</table>';
+}
+function renderTables() { Object.keys(HOST).forEach(renderTable); }
+
+function sumBox(label, val) { return `<div>${label}<b>${val}</b></div>`; }
+
+function update() {
+  const t = C.totals(S);
+  $('#s-earth').innerHTML = sumBox('Cut (m3)', fmt(t.earth.cut)) + sumBox('Fill (m3)', fmt(t.earth.fill)) +
+    sumBox('Net export (m3)', fmt(t.earth.net));
+  $('#s-pipes').innerHTML = sumBox('Trench excavation (m3)', fmt(t.pipes.exc)) + sumBox('Bedding (m3)', fmt(t.pipes.bed)) +
+    sumBox('Backfill (m3)', fmt(t.pipes.back));
+  $('#s-pave').innerHTML = sumBox('Pavement area (m2)', fmt(t.pave.area)) +
+    Object.keys(t.pave.byName).map(n => sumBox(n + ' (m3)', fmt(t.pave.byName[n]))).join('') +
+    sumBox('Kerb (m)', fmt(t.kerb));
+  renderQuote();
+  renderNet();
+  save();
+}
+
+function renderQuote() {
+  const lines = C.lines(S);
+  const q = C.quote(lines, S.rates, S.margin, S.gst);
+  let h = '<tr><th>Item</th><th>Unit</th><th class="num">Qty</th><th class="num">Rate ($)</th><th class="num">Amount ($)</th></tr>';
+  lines.forEach(l => {
+    const rate = S.rates[l.key] || 0;
+    h += `<tr><td>${l.label}</td><td>${l.unit}</td><td class="num">${fmt(l.qty)}</td>` +
+      `<td><input data-rate="${l.key}" type="number" step="any" value="${rate}" style="text-align:right"></td>` +
+      `<td class="num">${fmt(l.qty * rate)}</td></tr>`;
+  });
+  if (!lines.length) h += '<tr><td colspan="5">Enter quantities on the other tabs first.</td></tr>';
+  h += `<tr class="tot"><td colspan="4">Subtotal</td><td class="num">${fmt(q.sub)}</td></tr>` +
+    `<tr><td colspan="4">Margin ${S.margin}%</td><td class="num">${fmt(q.margin)}</td></tr>` +
+    `<tr><td colspan="4">GST ${S.gst}%</td><td class="num">${fmt(q.gst)}</td></tr>` +
+    `<tr class="tot"><td colspan="4">Total (inc GST)</td><td class="num">${fmt(q.total)}</td></tr>`;
+  const active = document.activeElement;
+  const keep = active && active.dataset.rate;
+  $('#quote-table').innerHTML = h;
+  if (keep) { const el = document.querySelector(`[data-rate="${keep}"]`); if (el) { el.focus(); el.setSelectionRange && 0; } }
+}
+
+document.addEventListener('input', e => {
+  const d = e.target.dataset;
+  if (d.l) {
+    const v = e.target.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
+    S[d.l][d.i][d.k] = v; update();
+  } else if (d.rate) {
+    S.rates[d.rate] = parseFloat(e.target.value) || 0; update();
+  } else if (e.target.id === 'margin') { S.margin = parseFloat(e.target.value) || 0; update(); }
+  else if (e.target.id === 'gst') { S.gst = parseFloat(e.target.value) || 0; update(); }
+  else if (e.target.id === 'project') { S.project = e.target.value; save(); }
+  else if (d.surf) { S[d.surf] = e.target.value; save(); }
+  else if (d.tpl) { S.tpl[d.tpl] = e.target.type === 'checkbox' ? e.target.checked : (parseFloat(e.target.value) || 0); save(); }
+});
+document.addEventListener('click', e => {
+  const d = e.target.dataset;
+  if (d.add) { S[d.add].push(DEF[d.add]()); renderTable(d.add); update(); }
+  if (d.cam) ArLite.measure({ kind: d.kind, title: 'Civil · ' + d.cam, ctx: { k: d.cam, kind: d.kind } });
+  if (d.del) { S[d.del].splice(+d.i, 1); renderTable(d.del); update(); }
+  if (d.t) {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('#nav button').forEach(x => x.classList.remove('on'));
+    $('#tab-' + d.t).classList.add('active'); e.target.classList.add('on');
+  }
+});
+
+const SU = { r: null };
+function surfMsg(t) { $('#s-surf').innerHTML = '<div>' + t + '</div>'; }
+function loadFile(inp, ta, key) {
+  const f = inp.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    const t = String(rd.result);
+    ta.value = /\.dxf$/i.test(f.name) ? C.parseDxf(t).map(p => p.x + ',' + p.y + ',' + p.z).join('\n') : t;
+    S[key] = ta.value; save();
+  };
+  rd.readAsText(f);
+}
+function drawPlan(r) {
+  const cv = $('#plan'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, g = r.g;
+  const ww = g.nx * g.cs, hh = g.ny * g.cs, sc = Math.min((W - 20) / ww, (H - 20) / hh), ox = (W - ww * sc) / 2, oy = (H - hh * sc) / 2;
+  let mx = 0; for (let k = 0; k < r.dz.length; k++) { const a = Math.abs(r.dz[k]); if (a > mx) mx = a; }
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  const img = ctx.getImageData(0, 0, W, H), d = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = Math.floor((x - ox) / sc / g.cs), j = Math.floor((H - oy - y) / sc / g.cs);
+    if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) continue;
+    const v = r.dz[j * g.nx + i]; if (!Number.isFinite(v)) continue;
+    const t = mx ? Math.min(1, Math.abs(v) / mx) * 0.85 + 0.1 : 0.1, c = v >= 0 ? [220, 60, 50] : [40, 100, 220], o = (y * W + x) * 4;
+    d[o] = 255 * (1 - t) + c[0] * t; d[o + 1] = 255 * (1 - t) + c[1] * t; d[o + 2] = 255 * (1 - t) + c[2] * t; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
+  const P = r.tin.pts, X = p => ox + (p.x - g.x0) * sc, Y = p => H - oy - (p.y - (g.y0)) * sc;
+  const cl = C.contours(r.tin, parseFloat($('#ci').value) || 0);
+  if (cl.length) { ctx.strokeStyle = '#1a7f4b'; ctx.lineWidth = 1.2; ctx.beginPath(); cl.slice(0, 20000).forEach(c => { ctx.moveTo(X({ x: c.x1 }), Y({ y: c.y1 })); ctx.lineTo(X({ x: c.x2 }), Y({ y: c.y2 })); }); ctx.stroke(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; }
+  r.tin.tris.slice(0, 5000).forEach(t => { ctx.beginPath(); ctx.moveTo(X(P[t[0]]), Y(P[t[0]])); ctx.lineTo(X(P[t[1]]), Y(P[t[1]])); ctx.lineTo(X(P[t[2]]), Y(P[t[2]])); ctx.closePath(); ctx.stroke(); });
+}
+function calcSurf() {
+  const eg = C.parsePoints($('#eg').value);
+  if (eg.length < 3) return surfMsg('Add at least 3 existing ground points (X, Y, Z).');
+  let design;
+  if (document.querySelector('input[name=dm]:checked').value === 'level') {
+    const lv = parseFloat($('#dgLevel').value);
+    if (!Number.isFinite(lv)) return surfMsg('Enter the flat design level.');
+    design = { level: lv };
+  } else {
+    const dp = C.parsePoints($('#dg').value);
+    if (dp.length < 3) return surfMsg('Add at least 3 design points (X, Y, Z).');
+    design = { tin: C.tin(dp) };
+  }
+  const r = C.cutFill(eg, design, parseFloat($('#cs').value) || 1);
+  if (!r) return surfMsg('Could not build a surface. Check the points are not in a straight line.');
+  SU.r = r;
+  S.surf = { cut: r.cut, fill: r.fill, use: $('#useSurf').checked };
+  $('#s-surf').innerHTML = sumBox('Cut (m3)', fmt(r.cut)) + sumBox('Fill (m3)', fmt(r.fill)) + sumBox('Net export (m3)', fmt(r.net)) +
+    sumBox('Area (m2)', fmt(r.area)) + sumBox('Triangles', r.tin.tris.length) + sumBox('Grid (m)', fmt(r.g.cs));
+  drawPlan(r); update();
+}
+$('#b-surf').onclick = calcSurf;
+$('#egFile').onchange = e => loadFile(e.target, $('#eg'), 'egText');
+$('#dgFile').onchange = e => loadFile(e.target, $('#dg'), 'dgText');
+$('#useSurf').onchange = () => { if (S.surf) { S.surf.use = $('#useSurf').checked; update(); } };
+$('#eg').value = S.egText || ''; $('#dg').value = S.dgText || ''; $('#dgLevel').value = S.dgLevel || ''; if (S.cs) $('#cs').value = S.cs;
+if (S.dmode === 'pts') document.querySelector('input[name=dm][value=pts]').checked = true;
+if (S.surf) $('#useSurf').checked = !!S.surf.use;
+const SR = { r: null };
+function roadMsg(t) { $('#s-road').innerHTML = '<div>' + t + '</div>'; }
+function drawProfile(r) {
+  const cv = $('#prof'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, pad = 36;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  const xs = r.rows.map(a => a.ch), ys = r.rows.flatMap(a => [a.eg, a.dg]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys) - 0.5, y1 = Math.max(...ys) + 0.5;
+  const X = v => pad + (v - x0) / ((x1 - x0) || 1) * (W - pad - 10), Y = v => H - pad - (v - y0) / ((y1 - y0) || 1) * (H - pad - 10);
+  ctx.strokeStyle = '#999'; ctx.lineWidth = 1; ctx.strokeRect(pad, 10, W - pad - 10, H - pad - 10);
+  ctx.fillStyle = '#555'; ctx.font = '11px sans-serif';
+  ctx.fillText(y1.toFixed(1), 2, 20); ctx.fillText(y0.toFixed(1), 2, H - pad); ctx.fillText(x0.toFixed(0), pad, H - 14); ctx.fillText(x1.toFixed(0), W - 40, H - 14);
+  const line = (k, col) => { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); r.rows.forEach((a, i) => { if (i) ctx.lineTo(X(a.ch), Y(a[k])); else ctx.moveTo(X(a.ch), Y(a[k])); }); ctx.stroke(); };
+  line('eg', '#8a6d3b'); line('dg', '#0f5fa8');
+  ctx.fillStyle = '#8a6d3b'; ctx.fillText('Existing ground', pad + 6, 24); ctx.fillStyle = '#0f5fa8'; ctx.fillText('Design', pad + 110, 24);
+}
+function calcRoad() {
+  const eg = C.parsePoints($('#eg').value);
+  if (eg.length < 3) return roadMsg('Add existing ground points on the Surfaces tab first.');
+  const al = C.alignment(S.al);
+  if (!al.segs.length) return roadMsg('The alignment needs at least 2 different points.');
+  if (!S.vp.length) return roadMsg('Add the design profile.');
+  const r = C.corridor(C.tin(eg), al, S.vp, S.tpl, S.layers);
+  if (!r.rows.length) return roadMsg('The alignment is outside the existing ground surface.');
+  SR.r = r;
+  S.road = { cut: r.cut, fill: r.fill, area: r.area, kerb: r.kerb, layers: r.layers, use: $('#useRoad').checked };
+  $('#s-road').innerHTML = sumBox('Length (m)', fmt(r.length)) + sumBox('Cut (m3)', fmt(r.cut)) + sumBox('Fill (m3)', fmt(r.fill)) + sumBox('Net export (m3)', fmt(r.net)) +
+    sumBox('Carriageway (m2)', fmt(r.area)) + sumBox('Kerb (m)', fmt(r.kerb)) + (r.skipped.length ? sumBox('Stations outside ground', r.skipped.length) : '');
+  $('#road-table').innerHTML = '<table><tr><th class="num">Chainage</th><th class="num">Ground</th><th class="num">Design</th><th class="num">Cut area</th><th class="num">Fill area</th></tr>' +
+    r.rows.slice(0, 300).map(a => `<tr><td class="num">${fmt(a.ch)}</td><td class="num">${fmt(a.eg)}</td><td class="num">${fmt(a.dg)}</td><td class="num">${fmt(a.cut)}</td><td class="num">${fmt(a.fill)}</td></tr>`).join('') + '</table>';
+  drawProfile(r); update();
+}
+function renderNet() {
+  const N = C.network(S.net);
+  $('#s-net').innerHTML = sumBox('Trench (m3)', fmt(N.exc)) + sumBox('Bedding (m3)', fmt(N.bed)) + sumBox('Backfill (m3)', fmt(N.back)) +
+    sumBox('Pits', N.pits[0] + N.pits[1] + N.pits[2]) + Object.keys(N.byDia).map(d => sumBox('DN' + d + ' (m)', fmt(N.byDia[d]))).join('');
+  $('#net-out').innerHTML = N.runs.length ? '<table><tr><th>Run</th><th class="num">Grade %</th><th class="num">Avg depth (m)</th><th class="num">Trench (m3)</th><th>Check</th></tr>' +
+    N.runs.map(r => `<tr><td>${r.name || ''}</td><td class="num">${fmt(r.grade)}</td><td class="num">${fmt(r.avg)}</td><td class="num">${fmt(r.exc)}</td><td class="${r.flags.length ? 'bad' : 'ok'}">${r.flags.length ? r.flags.join(', ') : 'OK'}</td></tr>`).join('') + '</table>' : '';
+}
+$('#b-road').onclick = calcRoad;
+$('#ci').value = S.contourInt || '';
+$('#alFile').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { const pl = C.parseDxfPolyline(t); if (pl.length < 2) return roadMsg('No polyline found in that DXF.'); S.al = pl; renderTable('al'); save(); }); };
+$('#b-save').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(Object.assign({ schema: 'rhc.civil-project/1' }, S))], { type: 'application/json' })); a.download = 'CivilAI-job-' + (S.project || 'job').replace(/[^\w-]+/g, '_') + '.tjob'; a.click(); };
+$('#jobFile').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { try { const o = JSON.parse(t); if (!o || !Array.isArray(o.sections)) throw 0; localStorage.setItem('shopmate-civil', JSON.stringify(o)); location.reload(); } catch (er) { alert('That is not a CivilAI job file.'); } }); };
+$('#useRoad').onchange = () => { if (S.road) { S.road.use = $('#useRoad').checked; update(); } };
+if (S.road) $('#useRoad').checked = !!S.road.use;
+document.querySelectorAll('[data-tpl]').forEach(el => { const v = S.tpl[el.dataset.tpl]; if (el.type === 'checkbox') el.checked = !!v; else el.value = v; });
+$('#b-json').onclick = () => {
+  const lines = C.lines(S).map(l => ({ name: l.label, qty: Math.round(l.qty * 1000) / 1000, unit: l.unit, price: Math.round((S.rates[l.key] || 0) * (1 + S.margin / 100) * 100) / 100 }));
+  const o = { app: 'CivilAI', title: S.project || 'Civil estimate', pricesIncludeGst: false, lines };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }));
+  a.download = 'CivilAI-' + (S.project || 'estimate').replace(/[^\w-]+/g, '_') + '.json';
+  a.click();
+};
+$('#b-job').onclick = () => {
+  const U = { ea: 'No.', m: 'm', m2: 'm2', m3: 'm3' }, now = new Date(), id = 'CV-' + now.toISOString().slice(0, 10).replace(/-/g, '') + '-' + String(now.getTime()).slice(-4);
+  const items = C.lines(S).map((l, i) => { const r = Math.round((S.rates[l.key] || 0) * (1 + S.margin / 100) * 100) / 100;
+    return { item_id: 'C-' + String(i + 1).padStart(4, '0'), room: '', section: 'CIVIL WORKS', category: 'civil_' + l.key, desc: l.label, spec: '', qty: Math.round(l.qty * 1000) / 1000, unit: U[l.unit] || l.unit, waste_pct: 0, cost_rate: r > 0 ? r : null, hours: 0, labour: 0, materials: 0, supplier_code: '', notes: '', trade: 'civil' }; });
+  if (!items.length) return alert('Nothing to export yet. Add some quantities first.');
+  const o = { schema: 'rhc.estimate-job/1', schema_version: 1, trade: 'builders', generator: { app: 'CivilAI', kind: 'quantity-job', exported: now.toISOString() },
+    job: { id, name: S.project || 'Civil estimate', client: { name: '', abn: '', email: '', phone: '' }, address: '', contact: '', source_drawing: '' },
+    settings: { currency: 'AUD', gst_pct: S.gst, markup_pct: S.margin, units: { length: 'm', area: 'm2', volume: 'm3', mass: 'kg', angle: 'deg', thickness: 'mm', currency: 'AUD' } }, rooms: [], items };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 1)], { type: 'application/json' }));
+  a.download = id + '.tjob'; a.click();
+};
+$('#b-test').onclick = () => {
+  $('#test-out').innerHTML = C.selfTest().map(r =>
+    `<p class="${r.ok ? 'ok' : 'bad'}">${r.ok ? 'PASS' : 'FAIL'}: ${r.name}</p>`).join('');
+};
+$('#b-pdf').onclick = () => window.print();
+$('#b-xls').onclick = () => {
+  const lines = C.lines(S);
+  const q = C.quote(lines, S.rates, S.margin, S.gst);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  let h = '<html><head><meta charset="utf-8"></head><body><table border="1">' +
+    `<tr><td colspan="5"><b>${esc(S.project || 'Civil quote')}</b></td></tr>` +
+    '<tr><th>Item</th><th>Unit</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>';
+  lines.forEach(l => {
+    const r = S.rates[l.key] || 0;
+    h += `<tr><td>${esc(l.label)}</td><td>${l.unit}</td><td>${l.qty.toFixed(2)}</td><td>${r}</td><td>${(l.qty * r).toFixed(2)}</td></tr>`;
+  });
+  h += `<tr><td colspan="4">Subtotal</td><td>${q.sub.toFixed(2)}</td></tr>` +
+    `<tr><td colspan="4">Margin ${S.margin}%</td><td>${q.margin.toFixed(2)}</td></tr>` +
+    `<tr><td colspan="4">GST ${S.gst}%</td><td>${q.gst.toFixed(2)}</td></tr>` +
+    `<tr><td colspan="4"><b>Total inc GST</b></td><td><b>${q.total.toFixed(2)}</b></td></tr></table></body></html>`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([h], { type: 'application/vnd.ms-excel' }));
+  a.download = (S.project || 'civil-quote').replace(/[^\w-]+/g, '_') + '.xls';
+  a.click();
+};
+
+$('#project').value = S.project || '';
+$('#margin').value = S.margin;
+$('#gst').value = S.gst;
+renderTables();
+update();
+</script>
+</body>
+</html>

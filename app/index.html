@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<script src="bridge.js?v=286"></script><script src="pdf.js?v=286"></script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ShopMate">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F8F9FA">
+<meta name="format-detection" content="telephone=no">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ShopMate AI</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<script>/* "TradeAi presents": once each time the app starts, then it fades away */try{if(!sessionStorage.getItem("taiShown")){sessionStorage.setItem("taiShown","1");document.write('<div class="tai-splash" id="taiSplash" aria-hidden="true"><i></i><b>TradeAi</b><small>PRESENTS</small><i></i></div>');setTimeout(function(){var s=document.getElementById("taiSplash");if(s)s.remove();},2400);}}catch(e){}</script>
+<div class="app">
+  <div id="topHead"></div>
+  <div id="banner"></div>
+  <main id="main"></main>
+</div>
+
+<div class="dock" id="dock">
+  <button class="dock-search" id="dockSearch" type="button" data-act="openSearch" data-ico="search"><span id="dockLbl">Search anything</span></button>
+  <button class="dock-more" id="dockMore" type="button" data-act="pageMenu" aria-label="More for this page" title="More for this page" hidden>⋯</button>
+  <button class="fab" id="fab" type="button" data-act="openFab" aria-label="Create new" title="Create new"><span aria-hidden="true">＋</span></button>
+</div>
+
+<nav class="tabs" aria-label="Sections"><div class="in">
+  <button class="tab" type="button" data-tab="invoices" data-ico="home">Home</button>
+  <button class="tab" type="button" data-invtab="1" data-ico="invoice">Invoices</button>
+  <button class="tab" type="button" data-tab="customers" data-ico="people">Customers</button>
+  <button class="tab" type="button" data-tab="reports" data-ico="chart">Reports</button>
+  <button class="tab" type="button" data-act="openMore" data-more="1" data-ico="grid">More</button>
+  <button class="tab ai" type="button" data-act="openAi" aria-label="Ask AI"><span class="ai-chip"><b>AI</b><span class="spark">✦</span></span><span>AI</span></button>
+</div></nav>
+
+<div id="sheet"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
